@@ -1,4 +1,4 @@
-var ottotrechos = {
+{
 "type": "FeatureCollection",
 "name": "ottotrechos",
 "crs": { "type": "name", "properties": { "name": "urn:ogc:def:crs:EPSG::4674" } },
@@ -3110,4 +3110,4 @@ var ottotrechos = {
 { "type": "Feature", "properties": { "COBACIA": "_VIRTUAL30", "IDDOMINIAL": 0, "DETALHE": 0, "NUCOMPTREC": 0.0, "COCURSODAG": "0", "COHIDRO": "0", "COBACIAJUS": "_VIRTUAL31", "VAZAO_MIN": 0.0, "PERDAS": 0, "COEF_A": 0.24835, "COEF_B": 0.722, "COEF_C": 0.52256, "COEF_D": 0.46215, "ALTITUDE": 0, "DECLIVIDAD": 0.0, "CLASSE_ENQ": 2, "T_A": 20.0, "T_K": 0.0, "OD_KD": 0.0, "DBO_KD": 0.2, "DBO_KF": 0.05, "P_KF": 0.02, "P_KOI": 0.0, "P_KS": 0.0, "N_KF": 0.01, "N_KS": 0.0, "N_KOA": 0.0, "N_KAI": 0.0, "N_KIN": 0.0, "OBS": null, "CRITICIDAD": 0, "C_K": 1.0, "OD_KA": -1.0, "NOCOMPLETO": null }, "geometry": { "type": "MultiLineString", "coordinates": [ [ [ -53.180472417472387, -22.69936401584879 ], [ -53.180368949632907, -22.69936401584879 ] ] ] } },
 { "type": "Feature", "properties": { "COBACIA": "_VIRTUAL31", "IDDOMINIAL": 0, "DETALHE": 0, "NUCOMPTREC": 0.0, "COCURSODAG": "0", "COHIDRO": "0", "COBACIAJUS": "0", "VAZAO_MIN": 0.0, "PERDAS": 0, "COEF_A": 0.24835, "COEF_B": 0.722, "COEF_C": 0.52256, "COEF_D": 0.46215, "ALTITUDE": 0, "DECLIVIDAD": 0.0, "CLASSE_ENQ": 2, "T_A": 20.0, "T_K": 0.0, "OD_KD": 0.0, "DBO_KD": 0.2, "DBO_KF": 0.05, "P_KF": 0.02, "P_KOI": 0.0, "P_KS": 0.0, "N_KF": 0.01, "N_KS": 0.0, "N_KOA": 0.0, "N_KAI": 0.0, "N_KIN": 0.0, "OBS": null, "CRITICIDAD": 0, "C_K": 1.0, "OD_KA": -1.0, "NOCOMPLETO": null }, "geometry": { "type": "MultiLineString", "coordinates": [ [ [ -53.180472417472387, -22.69924061684139 ], [ -53.180368949632907, -22.69924061684139 ] ] ] } }
 ]
-};
+}
