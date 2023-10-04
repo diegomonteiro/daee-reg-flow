@@ -12,8 +12,14 @@ var isolines_json    = require('../public/layers/rain_isoline.json');
 var rau_json         = require('../public/layers/rau.json');
 var rxyz_json        = require('../public/layers/rxyz.json');
 
+const return_periods = [10,15,20,25,50,100];
+const d_months = [1,2,3,4,5,6];
+const pps = [5,10,15,20,25,30,40,50,60,70,75,80,85,90,95,100];
+//Number seconds of Month
+const K = 2628000;
+
 const regflow = {
-    
+
     getMeanRainfallByGeometry(basin_border_geo, cellGridSize=1, optionsGrid={units: 'kilometers'}, weighted_by='area'){
         const bounds = turf.bbox(basin_border_geo.geometry);
 
@@ -114,16 +120,65 @@ const regflow = {
     },
 
     /**
+     * Method to calculate minimal discharge
+     * @param {*} region 
+     * @param {*} time 
+     * @param {*} coef_a 
+     * @param {*} coef_b 
+     * @param {*} qls_m3s 
+     * @param {*} dmonth 
+     * @returns 
+     */
+    calculateQmin(region, time, coef_a, coef_b, qls_m3s, dmonth){
+        var xt = this.getXTCoef(region, time);
+        ret = xt * (coef_a + coef_b * dmonth) * qls_m3s;
+        return ret;
+    },
+
+    /**
      * Method to calculate Q7,T Minimal Discharges
      */
     calculateQ7T(coef_c, region, t, val_a, val_b, qls_m3s){
         var xt  = this.getXTCoef(region, t);
         var ret = coef_c * xt * (val_a + val_b) * qls_m3s;
-        console.log("Q7,"+t+" => "+ret);
+        console.log("Q7,"+return_periods[t]+" => "+ret);
         return ret;
     },
 
-    calculateVolumeRegularization(){},
+    /**
+     * Method to calculate Max Volume to Regularization
+     * @param {*} qf Firm discharge
+     * @param {*} region Region A..U
+     * @param {*} t Return Time
+     * @param {*} coef_a Coef A
+     * @param {*} coef_b Coef B
+     * @param {*} qls_m3s Plurianual Discharge
+     * @param {*} d_months Qtd.Months to multiply seconds in month
+     * @returns 
+     */
+    calculateVolumeRegularization(qf,region,t, coef_a, coef_b, qls_m3s, d_months=1){
+        var xt = this.getXTCoef(region,t);
+        var ret = (Math.pow((qf-(xt*coef_a*qls_m3s)), 2)/(4*xt*coef_b*qls_m3s))*(d_months * K);
+        console.log("Max.Vol.Regularization: "+ret);
+        return ret;
+    },
+
+    /**
+     * Method to calculate critical duration
+     * @param {*} qf Firm discharge
+     * @param {*} region Region A..U
+     * @param {*} t Return Period
+     * @param {*} coef_a Coef A
+     * @param {*} coef_b Coef B
+     * @param {*} qls_m3s Plurianual Discharge
+     * @returns 
+     */
+    calculateCriticalDuration(qf,region,t,coef_a,coef_b,qls_m3s){
+        var xt = this.getXTCoef(region,t);
+        var ret = (qf-(xt*coef_a*qls_m3s))/(2*xt*coef_b*qls_m3s);
+        console.log("Critical.Duration: "+ret);
+        return ret;
+    },
 
 
     /**
@@ -173,7 +228,7 @@ const regflow = {
      * @param {Int} time {10,15,20,25,50,100}
      */
     getXTCoef(region, time){
-  
+        console.log("Getting XT Coef: ", region," => ", time);
         var regions = {
       
           //Region R
@@ -300,7 +355,7 @@ const regflow = {
      * Method to Get Elevation by Mapbox Service
      */
     async getElevationByCoords(lat,lon){
-        var token = "pk.eyJ1IjoiZGllZ29tb250ZWlybyIsImEiOiJjaXFjYjBqbnAwMjZjZndtMXVndWpiOXFwIn0.rTkBcWvjVGH2qdr2ATVwOg";
+        var token = process.env.MAPBOX_TOKEN;
         const query = await fetch(
             `https://api.mapbox.com/v4/mapbox.mapbox-terrain-v2/tilequery/${lon},${lat}.json?layers=contour&limit=50&access_token=${token}`,
             { method: 'GET' }

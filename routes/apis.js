@@ -69,7 +69,68 @@ router.get('/ottotrechos/:cod', function(req,res,next){
 
         res.status(200).json('not found')
     }
-})
+});
+
+router.get('/calculate_critical_duration/:qf/:xt/:a/:b/:qls_m3s', function(req,res,next){
+    async function run(){
+        var qf = parseFloat(req.params['qf']);
+        var xt = parseFloat(req.params['xt']);
+        var a  = parseFloat(req.params['a']);
+        var b  = parseFloat(req.params['b']);
+        var q  = parseFloat(req.params['qls_m3s']);
+
+        var ret = (qf-(xt*a*q))/(2*xt*b*q);
+
+        res.status(200).json({
+            critical_duration: ret
+        })
+    }
+
+    run().catch(console.log);
+});
+
+router.get('/calculate_volume_regularization/:qf/:xt/:a/:b/:d/:qls_m3s/:k', function(req,res,next){
+    async function run(){
+        var qf = parseFloat(req.params['qf']);
+        var xt = parseFloat(req.params['xt']);
+        var a  = parseFloat(req.params['a']);
+        var b  = parseFloat(req.params['b']);
+        var d  = parseFloat(req.params['d']);
+        var q  = parseFloat(req.params['qls_m3s']);
+        var k  = parseFloat(req.params['k']);
+
+        var ret = (qf-xt*(a+b*d)*q)*k*d;
+
+        res.status(200).json({
+            vol: ret
+        })
+    };
+
+    run().catch(console.log);
+});
+
+router.get('/calculate_max_volume_regularization/:qf/:region/:t/:a/:b/:qls_m3s/:k', function(req,res,next){
+    async function run(){
+        var qf = parseFloat(req.params['qf']);
+        var xt = this.getXTCoef(req.params['region'], req.params['t'])
+        var a  = parseFloat(req.params['a']);
+        var b  = parseFloat(req.params['b']);
+        var q  = parseFloat(req.params['qls_m3s']);
+        var k  = parseFloat(req.params['k']);
+
+        console.log("Qf: "+qf+" - Xt: "+xt+" - A: "+a+" - B: "+b+" - Qa:"+q+" - k: "+k);
+        //var ret = (Math.pow(qf-(xt*a*q),2)/(4*xt*b*q))*k;
+        //regflow.calculateVolumeRegularization(qf, )
+
+        console.log("Max: "+ret);
+
+        res.status(200).json({
+            max_volume: ret
+        })
+    } 
+    
+    run().catch(console.log);
+});
 
 router.get('/calculate_discharge_avg/:coef_a/:coef_b/:avg_rainfall/:area_km2', function(req,res,next){
     async function run(){
@@ -90,9 +151,23 @@ router.get('/calculate_discharge_avg/:coef_a/:coef_b/:avg_rainfall/:area_km2', f
     run().catch(console.log);
 });
 
-router.get('/calculate_minimal_anual_discharge_xt/:xt/:a/:b/:dmonth', function(req,res,next){
+router.get('/calculate_minimal_discharge/:region/:time/:a/:b/:dmonth/:qls_m3s', function(req,res,next){
     async function run(){
-        
+        var region = req.params['region'];
+        var time   = req.params['time'];
+        var xt      = regflow.getXTCoef(region,time);
+        var dm      = parseInt(req.params['dmonth']);
+        var qls_m3s = parseFloat(req.params['qls_m3s']);
+        var a       = parseFloat(req.params['a']);
+        var b       = parseFloat(req.params['b']);
+
+        var ret = regflow.calculateQmin(region, time, a, b, qls_m3s, dm);
+
+        console.log("Calculate Minimal Anual Discharge: ",xt,", ",a,", ",b,", ",dm," => ",ret);
+
+        res.status(200).json({
+            qmin: ret
+        })
     }
 
     run().catch(console.log);
@@ -162,6 +237,7 @@ router.get('/coords_join/:lat/:lon', function(req,res,next){
         avg_discharge = regflow.calculateAvgFlowRateLongPeriod(rau_obj.properties.A_MEDIA, rau_obj.properties.B_MEDIA, rainfall_calc.avg_areas, area_calc);
         q95_calc      = regflow.calculateQ95(rau_obj.properties.REGIAO, 14);
         q710_calc     = regflow.calculateQ7T(rxyz_obj.properties.C, rau_obj.properties.REGIAO, 0, rau_obj.properties.A, rau_obj.properties.B, avg_discharge);
+        qmin_calc     = regflow.calculateQmin(rau_obj.properties.REGIAO, 0, rau_obj.properties.A, rau_obj.properties.B, avg_discharge, 1);
 
         res.status(200).json({
             latitude: lat,
@@ -175,7 +251,8 @@ router.get('/coords_join/:lat/:lon', function(req,res,next){
             city: city_obj,
             avg_discharge: avg_discharge,
             q95:  q95_calc,
-            q710: q710_calc
+            q710: q710_calc,
+            qmin: qmin_calc
         })
     }
     run().catch(console.log);
