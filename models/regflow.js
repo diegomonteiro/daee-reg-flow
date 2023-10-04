@@ -20,6 +20,14 @@ const K = 2628000;
 
 const regflow = {
 
+    /**
+     * Method to get Mean of Precipitation Using Geometry (GeoJSON)
+     * @param {*} basin_border_geo GeoJSON with Borders
+     * @param {*} cellGridSize Size of Cellgrid
+     * @param {*} optionsGrid {units: 'kilometers'}
+     * @param {*} weighted_by Weighted options: {area,points}
+     * @returns 
+     */
     getMeanRainfallByGeometry(basin_border_geo, cellGridSize=1, optionsGrid={units: 'kilometers'}, weighted_by='area'){
         const bounds = turf.bbox(basin_border_geo.geometry);
 

@@ -9,6 +9,12 @@ var indexRouter = require('./routes/index');
 var usersRouter = require('./routes/users');
 var apiRouter   = require('./routes/apis');
 
+var inject = require('@vercel/analytics');
+
+console.log(inject);
+
+inject.inject();
+
 var app = express();
 
 // view engine setup
