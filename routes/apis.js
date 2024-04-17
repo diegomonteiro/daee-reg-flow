@@ -15,6 +15,7 @@ var ottotrechos_json = require('../public/layers/ottotrechos.json');
 var isolines_json    = require('../public/layers/rain_isoline.json');
 var rau_json         = require('../public/layers/rau.json');
 var rxyz_json        = require('../public/layers/rxyz.json');
+var limite_sp_json   = require('../public/layers/limite_estadual_sp.json');
 
 /**
  * List all Cities
@@ -71,6 +72,9 @@ router.get('/ottotrechos/:cod', function(req,res,next){
     }
 });
 
+/**
+ * Method to calculte critical duration using parameters
+ */
 router.get('/calculate_critical_duration/:qf/:xt/:a/:b/:qls_m3s', function(req,res,next){
     async function run(){
         var qf = parseFloat(req.params['qf']);
@@ -89,6 +93,9 @@ router.get('/calculate_critical_duration/:qf/:xt/:a/:b/:qls_m3s', function(req,r
     run().catch(console.log);
 });
 
+/**
+ * Method to calculate volume regularization
+ */
 router.get('/calculate_volume_regularization/:qf/:xt/:a/:b/:d/:qls_m3s/:k', function(req,res,next){
     async function run(){
         var qf = parseFloat(req.params['qf']);
@@ -109,6 +116,9 @@ router.get('/calculate_volume_regularization/:qf/:xt/:a/:b/:d/:qls_m3s/:k', func
     run().catch(console.log);
 });
 
+/**
+ * Method to calculte max volume to regularization
+ */
 router.get('/calculate_max_volume_regularization/:qf/:region/:t/:a/:b/:qls_m3s/:k', function(req,res,next){
     async function run(){
         var qf = parseFloat(req.params['qf']);
@@ -132,6 +142,9 @@ router.get('/calculate_max_volume_regularization/:qf/:region/:t/:a/:b/:qls_m3s/:
     run().catch(console.log);
 });
 
+/**
+ * Method to calculate mean discharge using coef a, coef b, avg rainfall and area km²
+ */
 router.get('/calculate_discharge_avg/:coef_a/:coef_b/:avg_rainfall/:area_km2', function(req,res,next){
     async function run(){
         var coef_a = parseFloat(req.params['coef_a']);
@@ -151,6 +164,15 @@ router.get('/calculate_discharge_avg/:coef_a/:coef_b/:avg_rainfall/:area_km2', f
     run().catch(console.log);
 });
 
+/**
+ * Method to calculate minimal discharge
+ * Region
+ * Time
+ * Coef A
+ * Coef B
+ * Months
+ * Discharge
+ */
 router.get('/calculate_minimal_discharge/:region/:time/:a/:b/:dmonth/:qls_m3s', function(req,res,next){
     async function run(){
         var region = req.params['region'];
@@ -173,6 +195,29 @@ router.get('/calculate_minimal_discharge/:region/:time/:a/:b/:dmonth/:qls_m3s', 
     run().catch(console.log);
 });
 
+router.get("/coords_check/:lat1/:lon1/:lat2/:lon2", function(req,res,next){
+    async function run(){
+        var lat1 = parseFloat(req.params['lat1']);
+        var lon1 = parseFloat(req.params['lon1']);
+        var lat2 = parseFloat(req.params['lat2']);
+        var lon2 = parseFloat(req.params['lon2']);
+
+        const turf_point1 = turf.point([lon1, lat1]);
+        const turf_point2 = turf.point([lon2, lat2]);
+
+        let ret = turf.booleanIntersects(turf_point1, turf_point2);
+
+        res.status(200).json({
+            ret: ret
+        })
+    }
+
+    run().catch(console.log);
+})
+
+/**
+ * Merge all layers by coordinates
+ */
 router.get('/coords_join/:lat/:lon', function(req,res,next){
     async function run(){
         var lat = parseFloat(req.params['lat']);
@@ -182,6 +227,8 @@ router.get('/coords_join/:lat/:lon', function(req,res,next){
 
         const turf_point = turf.point([lon, lat]);
 
+        console.log("Turf point: ", turf_point);
+
         let city_obj = {};
         let ottobacia_obj = {};
         let ottotrecho_obj = {};
@@ -190,27 +237,53 @@ router.get('/coords_join/:lat/:lon', function(req,res,next){
         let rau_obj = {};
         let rxyz_obj = {};
 
+        let point_is_valid = false;
+
+        //Check if point in Cities or State SP
+        turf.featureEach(limite_sp_json, function(uf_sp, index){
+            console.log("UF: ", uf_sp);
+            if(turf.booleanPointInPolygon(turf_point, uf_sp)){
+                point_is_valid = true;
+            }
+        })
+
+        console.log("Point in SP: ", point_is_valid);
+
+        //Point Outside UF State
+        if(!point_is_valid){
+            res.status(400).json({
+                latitude: lat,
+                longitude: lon,
+                error: 'Point outside SP'
+            });
+        }       
+
         //Check City
         turf.featureEach(municipios_json, function (city, index) {
             if(turf.booleanIntersects(city.geometry, turf_point)){
                 city_obj = city;
+                console.log("City finded: ", city_obj.geometry.type);
             }
         })
 
         //Check Ottobacia
         turf.featureEach(ottobacias_json, function(ottobacia, index){
+            //console.log(index," => ", ottobacia.geometry.type);
+
             if(turf.booleanIntersects(ottobacia.geometry, turf_point)){
                 ottobacia_obj = ottobacia;
+                console.log("Ottobasin finded: ", ottobacia_obj.geometry.type);
             }
         });
 
         //Find Isolines por Ottotrecho
         turf.featureEach(isolines_json, function(isoline, index){
+            //console.log("Isoline Each: ", isoline)
             if(turf.booleanIntersects(ottobacia_obj.geometry, isoline.geometry)){
                 isolines_obj.push(isoline);
+                console.log("Isolines finded: ", isoline.geometry.type);
             }
         });
-            
 
         //Find Ottotrecho por Ottobacia
         ottotrecho_obj = _.filter(ottotrechos_json.features, function(e){
@@ -221,12 +294,14 @@ router.get('/coords_join/:lat/:lon', function(req,res,next){
         turf.featureEach(rau_json, function(rau,index){
             if(turf.booleanIntersects(rau.geometry, turf_point)){
                 rau_obj = rau;
+                console.log("A..U coeficients finded: ", rau_obj.geometry.type);
             }
         });
 
         turf.featureEach(rxyz_json, function(rxyz,index){
             if(turf.booleanIntersects(rxyz.geometry, turf_point)){
                 rxyz_obj = rxyz;
+                console.log("XYZ Region finded: ", rxyz_obj.geometry.type);
             }
         })
 
