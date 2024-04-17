@@ -103,6 +103,10 @@ const regflow = {
 
     /**
      * Method to calculate PluriAnual Discharge
+     * @abstract: Through studies carried out by DAEE in 1983, it was found that multi-annual average discharge, in a given section of
+     * a water course, can ge obtained with a good aproximation, through a linear relationship of this flow() with the average
+     * annual precipitation in the basin hydrographic
+     * @returns avg_discharge_year in m³/s
      * @param {float} coef_a
      * @param {float} coef_b
      * @param {float} avg_rainfall
@@ -148,7 +152,16 @@ const regflow = {
      */
     calculateQ7T(coef_c, region, t, val_a, val_b, qls_m3s){
         var xt  = this.getXTCoef(region, t);
+
+        console.log("XT Getted: ", xt);
+
+        console.log("Coef.C: ", coef_c);
+        console.log("Val.a: ", val_a);
+        console.log("Val.b: ", val_b);
+        console.log("Qls: ", qls_m3s);
+
         var ret = coef_c * xt * (val_a + val_b) * qls_m3s;
+
         console.log("Q7,"+return_periods[t]+" => "+ret);
         return ret;
     },
@@ -166,6 +179,7 @@ const regflow = {
      */
     calculateVolumeRegularization(qf,region,t, coef_a, coef_b, qls_m3s, d_months=1){
         var xt = this.getXTCoef(region,t);
+        console.log("Coef XT: ", xt);
         var ret = (Math.pow((qf-(xt*coef_a*qls_m3s)), 2)/(4*xt*coef_b*qls_m3s))*(d_months * K);
         console.log("Max.Vol.Regularization: "+ret);
         return ret;
@@ -236,7 +250,7 @@ const regflow = {
      * @param {Int} time {10,15,20,25,50,100}
      */
     getXTCoef(region, time){
-        console.log("Getting XT Coef: ", region," => ", time);
+        console.log("Getting XT Coef:",region," => ",time);
         var regions = {
       
           //Region R
@@ -279,7 +293,7 @@ const regflow = {
           u: [0.594, 0.518, 0.469, 0.433, 0.330, 0.240]
         }
       
-        //console.log("Try Get XT Coef (Region,TR) => ", region," <> ",time);
+        console.log("Try Get XT Coef (Region,TR) => ", region," <> ",time);
         return regions[region.toLowerCase()][time];
     },
 

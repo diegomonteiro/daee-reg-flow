@@ -119,23 +119,27 @@ router.get('/calculate_volume_regularization/:qf/:xt/:a/:b/:d/:qls_m3s/:k', func
 /**
  * Method to calculte max volume to regularization
  */
-router.get('/calculate_max_volume_regularization/:qf/:region/:t/:a/:b/:qls_m3s/:k', function(req,res,next){
+router.get('/calculate_max_volume_regularization/:qf/:region/:t/:a/:b/:qls_m3s/:months', function(req,res,next){
     async function run(){
         var qf = parseFloat(req.params['qf']);
-        var xt = this.getXTCoef(req.params['region'], req.params['t'])
+        var region = req.params['region'];
+        var time   = req.params['t'];
+        
         var a  = parseFloat(req.params['a']);
         var b  = parseFloat(req.params['b']);
         var q  = parseFloat(req.params['qls_m3s']);
-        var k  = parseFloat(req.params['k']);
+        var months  = parseInt(req.params['months']);
 
-        console.log("Qf: "+qf+" - Xt: "+xt+" - A: "+a+" - B: "+b+" - Qa:"+q+" - k: "+k);
+        console.log("Qf: "+qf+" - A: "+a+" - B: "+b+" - Qa:"+q+" - months: "+months);
         //var ret = (Math.pow(qf-(xt*a*q),2)/(4*xt*b*q))*k;
-        //regflow.calculateVolumeRegularization(qf, )
+        var ret = regflow.calculateVolumeRegularization(qf,region,time,a,b,q,months);
 
         console.log("Max: "+ret);
 
         res.status(200).json({
-            max_volume: ret
+            volume_m3: ret,
+            volume_h3: ret/1000000,
+            units: "m³"
         })
     } 
     
@@ -143,7 +147,7 @@ router.get('/calculate_max_volume_regularization/:qf/:region/:t/:a/:b/:qls_m3s/:
 });
 
 /**
- * Method to calculate mean discharge using coef a, coef b, avg rainfall and area km²
+ * Method to calculate mean yearly discharge using coef a, coef b, avg rainfall and area km²
  */
 router.get('/calculate_discharge_avg/:coef_a/:coef_b/:avg_rainfall/:area_km2', function(req,res,next){
     async function run(){
@@ -157,7 +161,14 @@ router.get('/calculate_discharge_avg/:coef_a/:coef_b/:avg_rainfall/:area_km2', f
         console.log("AVG.discharge => "+ret);
 
         res.status(200).json({
-            avg: ret
+            avg: ret,
+            unit: "m³/s",
+            params:{
+                area_km2: area_km2,
+                coef_a: coef_a,
+                coef_b: coef_b,
+                avg_year_rainfall: avg_rainfall
+            }
         })
     }
 
@@ -183,32 +194,78 @@ router.get('/calculate_minimal_discharge/:region/:time/:a/:b/:dmonth/:qls_m3s', 
         var a       = parseFloat(req.params['a']);
         var b       = parseFloat(req.params['b']);
 
+        console.log("XT: ", xt);
+
         var ret = regflow.calculateQmin(region, time, a, b, qls_m3s, dm);
 
         console.log("Calculate Minimal Anual Discharge: ",xt,", ",a,", ",b,", ",dm," => ",ret);
 
         res.status(200).json({
-            qmin: ret
+            qmin: ret,
+            unit: "m³/s"
         })
     }
 
     run().catch(console.log);
 });
 
-router.get("/coords_check/:lat1/:lon1/:lat2/:lon2", function(req,res,next){
+router.get('/calculate_critical_duration/:region/:time/:qf/:a/:b/:qls_m3s', function(req,res,next){
     async function run(){
-        var lat1 = parseFloat(req.params['lat1']);
-        var lon1 = parseFloat(req.params['lon1']);
-        var lat2 = parseFloat(req.params['lat2']);
-        var lon2 = parseFloat(req.params['lon2']);
+        var region = req.params['region'];
+        var time   = req.params['time'];
+        var xt = regflow.getXTCoef(region,time);
 
-        const turf_point1 = turf.point([lon1, lat1]);
-        const turf_point2 = turf.point([lon2, lat2]);
+        var a = req.params['a'];
+        var b = req.params['b'];
+        var qf = parseFloat(req.params['qf']);
+        var qls_m3s = parseFloat(req.params['qls_m3s']);
 
-        let ret = turf.booleanIntersects(turf_point1, turf_point2);
+        ret = regflow.calculateCriticalDuration(qf,region,time,a,b,qls_m3s);
 
         res.status(200).json({
-            ret: ret
+            duration: ret,
+            duration_rounded: parseFloat(ret.toFixed(1)),
+            units: "months"
+        })
+    }
+
+    run().catch(console.log);
+});
+
+/**
+ * Calculate 95% permanence values
+ */
+router.get('/calculate_q95/:region/:qls_m3s', function(req,res,next){
+    async function run(){
+        var region = req.params['region'];
+        var qls_m3s = req.params['qls_m3s'];
+
+        var ret = regflow.calculateQ95(region,qls_m3s);
+        
+        res.status(200).json({
+            q95: ret,
+            units: "m³/s"
+        })  
+    }
+
+    run().catch(console.log);
+});
+
+router.get("/calculate_q7_10/:region/:c/:val_a/:val_b/:qls_m3s", function(req,res,next){
+    async function run(){
+
+        var region = req.params['region'];
+        var coef_c = parseFloat(req.params['c']);
+        var val_a  = parseFloat(req.params['val_a']);
+        var val_b  = parseFloat(req.params['val_b']);
+        var qls_m3s = parseFloat(req.params['qls_m3s']);
+
+        var ret = regflow.calculateQ7T(coef_c, region, 0, val_a, val_b, qls_m3s);
+
+        res.status(200).json({
+            q710: ret,
+            q710_rounded: parseFloat(ret.toFixed(2)),
+            units: "m³/s"
         })
     }
 

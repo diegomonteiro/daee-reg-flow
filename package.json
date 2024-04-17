@@ -9,6 +9,7 @@
     "@turf/turf": "^6.5.0",
     "@vercel/analytics": "^1.0.2",
     "axios": "^1.5.1",
+    "bootstrap": "^5.3.3",
     "compression": "^1.7.4",
     "cookie-parser": "~1.4.4",
     "debug": "~2.6.9",
