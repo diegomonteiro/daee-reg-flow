@@ -21,6 +21,177 @@ const K = 2628000;
 const regflow = {
 
     /**
+     * Method to Get Coeficients by input Geometry
+     * @param {*} basin_border_geo Basin Border
+     * @param {*} cellGridSize Size off Cellgrid
+     * @param {*} optionsGrid Units by distance (meters, kilometers..)
+     * @param {*} weighted_by Weighted type (area less eficient, points most eficient)
+     * @returns 
+     */
+    getRegionsCoeficientsByGeometry(basin_border_geo, cellGridSize=1, optionsGrid={units: 'kilometers'}, weighted_by='area'){
+        const bounds = turf.bbox(basin_border_geo.geometry);
+        const extent = bounds;
+        const point_grids = turf.pointGrid(extent, cellGridSize, optionsGrid);
+
+        //Rau AVG Weighted
+        rau_avg_a_weighted_areas = [];
+        rau_avg_b_weighted_areas = [];
+        rau_avg_xt10_weigted_areas = [];
+        rau_avg_coef_a_weighted_areas = [];
+        rau_avg_coef_b_weighted_areas = [];
+        rau_avg_qp95_weighted_areas = [];
+        rain_avg_weighted_areas = [];
+        rain_avg_weighted_points = [];
+
+        isobands = [];
+        rau_bands = [];
+        rxyz_bands = [];
+
+        rxyz_avg_weighted_areas = [];
+
+        //First Get Rau Object
+        turf.featureEach(rau_json, function(rauFeature, rauIndex){
+            //console.log("RAU Object: ", rauFeature);
+            //Check points on polygon
+            var pts = turf.pointsWithinPolygon(point_grids, rauFeature);
+
+            if(pts.features.length > 0){
+                console.log("Points in Polygon: ", pts.length);
+
+                turf.featureEach(basin_border_geo, function(basinFeature, basinIndex){
+                    const basinType = turf.getType(basinFeature)
+                    //console.log("Basin["+basinType+"]: ", basinFeature);
+
+                    if(basinType == "Polygon"){
+                        //console.log("Try convert Polygon to Line...")
+                        basinFeature = turf.polygonToLine(basinFeature);
+                    }
+                    //Get a intersection of BasinPolygon to IsobandPolygon
+                    var rau_band = turf.intersect(basinFeature, rauFeature);
+
+                    if(rau_band){
+                        console.log("Rau Band Valid: ", rau_band);
+                        var partial_area = turf.area(rau_band.geometry)/1000000;
+                        var avg_rau_obj = {
+                            id: rauFeature.properties.ID,
+                            region: rauFeature.properties.REGIAO,
+                            avg_a: rauFeature.properties.A_MEDIA,
+                            avg_b: rauFeature.properties.B_MEDIA,
+                            xt_10: rauFeature.properties.XT10,
+                            coef_a: rauFeature.properties.A,
+                            coef_b: rauFeature.properties.B,
+                            qp95: rauFeature.properties.QP95,
+                            partial_area: partial_area};
+                        rau_band.properties = _.merge(avg_rau_obj, basinFeature.properties);
+                        
+                        //Weight areas coefs
+                        rau_avg_a_weighted_areas.push({value: avg_rau_obj.avg_a, weight: partial_area});
+                        rau_avg_b_weighted_areas.push({value: avg_rau_obj.avg_a, weight: partial_area});
+                        rau_avg_xt10_weigted_areas.push({value: avg_rau_obj.xt_10, weight: partial_area});
+                        rau_avg_coef_a_weighted_areas.push({value: avg_rau_obj.coef_a, weight: partial_area});
+                        rau_avg_coef_b_weighted_areas.push({value: avg_rau_obj.coef_b, weight: partial_area});
+                        rau_avg_qp95_weighted_areas.push({value: avg_rau_obj.qp95, weight: partial_area});
+
+                        rau_bands.push(rau_band);                      
+                    }
+                })
+            }
+        });
+
+        turf.featureEach(rxyz_json, function(rxyzFeature, rxyzIndex){
+            //console.log("RXYZ Object: ", rxyzFeature);
+            var pts = turf.pointsWithinPolygon(point_grids, rxyzFeature);
+
+            if(pts.features.length > 0){
+                turf.featureEach(basin_border_geo, function(basinFeature, basinIndex){
+                    const basinType = turf.getType(basinFeature)
+                    //console.log("Basin["+basinType+"]: ", basinFeature);
+
+                    if(basinType == "Polygon"){
+                        //console.log("Try convert Polygon to Line...")
+                        basinFeature = turf.polygonToLine(basinFeature);
+                    }
+                    //Get a intersection of BasinPolygon to IsobandPolygon
+                    var rxyz_band = turf.intersect(basinFeature, rxyzFeature);
+
+                    if(rxyz_band){
+                        var partial_area = turf.area(rxyz_band.geometry)/1000000;
+                        var avg_rxyz_obj = {id: rxyzFeature.properties.ID, coef_c: rxyzFeature.properties.C, partial_area: partial_area};
+                        rxyz_band.properties = _.merge(avg_rxyz_obj, basinFeature.properties);
+                        
+                        rxyz_avg_weighted_areas.push({value: avg_rxyz_obj.coef_c, weight: partial_area});
+                        rxyz_bands.push(rxyz_band);                      
+                    }
+                })
+            }
+        });
+
+        turf.featureEach(isolines_json, function(rainFeature, rainIndex){
+            //Check point inside Rainfall Band
+            var pts = turf.pointsWithinPolygon(point_grids, rainFeature);
+
+            //Check if points exist
+            if(pts.features.length > 0){
+                //Each Basin Features to Check
+                turf.featureEach(basin_border_geo, function(basinFeature, basinIndex){
+                    const basinType = turf.getType(basinFeature)
+                    //console.log("Basin["+basinType+"]: ", basinFeature);
+
+                    if(basinType == "Polygon"){
+                        //console.log("Try convert Polygon to Line...")
+                        basinFeature = turf.polygonToLine(basinFeature);
+                    }
+
+                    //Get a intersection of BasinPolygon to IsobandPolygon
+                    var isoband = turf.intersect(basinFeature, rainFeature);
+                    //console.log("Isoband: ", isoband);
+
+                    if(isoband){
+                        var partial_area = turf.area(isoband.geometry)/1000000;
+                        var avg_rain_obj = {rain: rainFeature.properties.ID, partial_area: partial_area};
+                        
+                        //Save's calculated partial area into isoband
+                        isoband.properties = _.merge(avg_rain_obj, basinFeature.properties); 
+                        
+                        //console.log("Isoband Properties: ", _.merge(avg_rain_obj, basinFeature.properties));
+
+                        rain_avg_weighted_areas.push({value: avg_rain_obj.rain, weight: partial_area});
+                        isobands.push(isoband);                      
+                    }
+                })
+
+                var pts_tags = turf.tag(pts, rainFeature,'ID','rain');
+                var avg_rain = _.meanBy(pts_tags.features, function(o){ return o.properties.rain });
+                rain_avg_weighted_points.push({value: avg_rain, weight: pts_tags.features.length});
+            }
+        });
+
+        avg_rain_areas  = this.calculateAvgByWeight(rain_avg_weighted_areas);
+        avg_rain_points = this.calculateAvgByWeight(rain_avg_weighted_points);
+
+        return {
+            rau: {
+                bands: rau_bands,
+                avg_a:  this.calculateAvgByWeight(rau_avg_a_weighted_areas),
+                avg_b:  this.calculateAvgByWeight(rau_avg_b_weighted_areas),
+                xt_10:  this.calculateAvgByWeight(rau_avg_xt10_weigted_areas),
+                coef_a: this.calculateAvgByWeight(rau_avg_coef_a_weighted_areas),
+                coef_b: this.calculateAvgByWeight(rau_avg_coef_b_weighted_areas),
+                qp95:   this.calculateAvgByWeight(rau_avg_qp95_weighted_areas)
+            },
+            rxyz: {
+                bands: rxyz_bands,
+                coef_c: this.calculateAvgByWeight(rxyz_avg_weighted_areas)
+            },
+            isolines: {
+                avg_rain_areas: avg_rain_areas,
+                avg_rain_points: avg_rain_points,
+                bands: isobands
+            }
+        };
+    },
+
+    /**
      * Method to get Mean of Precipitation Using Geometry (GeoJSON)
      * @param {*} basin_border_geo GeoJSON with Borders
      * @param {*} cellGridSize Size of Cellgrid
@@ -68,7 +239,7 @@ const regflow = {
                         //console.log("Isoband Properties: ", _.merge(avg_rain_obj, basinFeature.properties));
 
                         rain_avg_weighted_areas.push({value: avg_rain_obj.rain, weight: partial_area});
-                        isobands.push(isoband);                        
+                        isobands.push(isoband);                      
                     }
                 })
 
@@ -114,7 +285,7 @@ const regflow = {
      */
     calculateAvgFlowRateLongPeriod(coef_a, coef_b, avg_rainfall, area){
         var ret = ((coef_a+(coef_b*avg_rainfall))*area)/1000;
-        console.log("Qavg(mm/year): a:",coef_a,", b:",coef_b,", p:",avg_rainfall,", area:",area," =>>> Result: ", ret);
+        console.log("Qavg(m³/s): a:",coef_a,", b:",coef_b,", p:",avg_rainfall,", area:",area," =>>> Result: ", ret);
         return ret;
     },
 
@@ -149,6 +320,12 @@ const regflow = {
 
     /**
      * Method to calculate Q7,T Minimal Discharges
+     * @param {*} coef_c 
+     * @param {*} region 
+     * @param {*} t 
+     * @param {*} val_a,
+     * @param {*} val_b,
+     * @param {*} qgs_m3s
      */
     calculateQ7T(coef_c, region, t, val_a, val_b, qls_m3s){
         var xt  = this.getXTCoef(region, t);
@@ -208,7 +385,7 @@ const regflow = {
      * @param {String} region {A..U}
      */
     getRelationRainToFlowRate(region){
-        var regions = {
+        var regions_rain = {
     
         //I - Region
         a: {param_a: -22.14, param_b: 0.0292},
@@ -240,8 +417,65 @@ const regflow = {
         u: {param_a: -4.62, param_b: 0.0098}
         }
     
-        return regions[region.toLowerCase()];
+        return regions_rain[region.toLowerCase()];
     
+    },
+
+    /**
+     * Method to Get XT Mean Coeficients by Regions Coeficients
+     * @param {*} regions 
+     * @param {*} time 
+     */
+    getXTCoefByRegions(regions, time){
+        var rets = [];
+
+        var regions = {
+      
+            //Region R
+            a: [0.708, 0.674, 0.655, 0.641, 0.607, 0.581],
+            b: [0.708, 0.674, 0.655, 0.641, 0.607, 0.581],
+            d: [0.708, 0.674, 0.655, 0.641, 0.607, 0.581],
+            e: [0.708, 0.674, 0.655, 0.641, 0.607, 0.581],
+            f: [0.708, 0.674, 0.655, 0.641, 0.607, 0.581],
+            i: [0.708, 0.674, 0.655, 0.641, 0.607, 0.581],
+            j: [0.708, 0.674, 0.655, 0.641, 0.607, 0.581],
+        
+            //Region S
+            c: [0.748, 0.723, 0.708, 0.698, 0.673, 0.656],
+            h: [0.748, 0.723, 0.708, 0.698, 0.673, 0.656],
+        
+            //Region T
+            g: [0.632, 0.588, 0.561, 0.543, 0.496, 0.461],
+        
+            //REgion V
+            k: [0.689, 0.658, 0.639, 0.626, 0.595, 0.572],
+            n: [0.689, 0.658, 0.639, 0.626, 0.595, 0.572],
+            o: [0.689, 0.658, 0.639, 0.626, 0.595, 0.572],
+        
+            //Region U
+            l: [0.759, 0.733, 0.717, 0.706, 0.677, 0.654],
+            m: [0.759, 0.733, 0.717, 0.706, 0.677, 0.654],
+        
+            //Region W
+            p: [0.619, 0.577, 0.552, 0.535, 0.426, 0.459],
+        
+            //Region X
+            q: [0.633, 0.572, 0.533, 0.504, 0.426, 0.358],
+        
+            //Region Y
+            r: [0.661, 0.629, 0.610, 0.598, 0.568, 0.546],
+            s: [0.661, 0.629, 0.610, 0.598, 0.568, 0.546],
+            t: [0.661, 0.629, 0.610, 0.598, 0.568, 0.546],   
+            
+            //Region z  
+            u: [0.594, 0.518, 0.469, 0.433, 0.330, 0.240]
+          }
+
+        $.each(regions, function(region){
+            rets.push(regions[region][time]);
+        });
+
+        return _.mean(rets);
     },
 
     /**
@@ -249,52 +483,52 @@ const regflow = {
      * @param {String} regions
      * @param {Int} time {10,15,20,25,50,100}
      */
-    getXTCoef(region, time){
-        console.log("Getting XT Coef:",region," => ",time);
+    getXTCoef(region, time){  
         var regions = {
       
-          //Region R
-          a: [0.708, 0.674, 0.655, 0.641, 0.607, 0.581],
-          b: [0.708, 0.674, 0.655, 0.641, 0.607, 0.581],
-          d: [0.708, 0.674, 0.655, 0.641, 0.607, 0.581],
-          e: [0.708, 0.674, 0.655, 0.641, 0.607, 0.581],
-          f: [0.708, 0.674, 0.655, 0.641, 0.607, 0.581],
-          i: [0.708, 0.674, 0.655, 0.641, 0.607, 0.581],
-          j: [0.708, 0.674, 0.655, 0.641, 0.607, 0.581],
-      
-          //Region S
-          c: [0.748, 0.723, 0.708, 0.698, 0.673, 0.656],
-          h: [0.748, 0.723, 0.708, 0.698, 0.673, 0.656],
-      
-          //Region T
-          g: [0.632, 0.588, 0.561, 0.543, 0.496, 0.461],
-      
-          //REgion V
-          k: [0.689, 0.658, 0.639, 0.626, 0.595, 0.572],
-          n: [0.689, 0.658, 0.639, 0.626, 0.595, 0.572],
-          o: [0.689, 0.658, 0.639, 0.626, 0.595, 0.572],
-      
-          //Region U
-          l: [0.759, 0.733, 0.717, 0.706, 0.677, 0.654],
-          m: [0.759, 0.733, 0.717, 0.706, 0.677, 0.654],
-      
-          //Region W
-          p: [0.619, 0.577, 0.552, 0.535, 0.426, 0.459],
-      
-          //Region X
-          q: [0.633, 0.572, 0.533, 0.504, 0.426, 0.358],
-      
-          //Region Y
-          r: [0.661, 0.629, 0.610, 0.598, 0.568, 0.546],
-          s: [0.661, 0.629, 0.610, 0.598, 0.568, 0.546],
-          t: [0.661, 0.629, 0.610, 0.598, 0.568, 0.546],   
-          
-          //Region z  
-          u: [0.594, 0.518, 0.469, 0.433, 0.330, 0.240]
-        }
-      
-        console.log("Try Get XT Coef (Region,TR) => ", region," <> ",time);
-        return regions[region.toLowerCase()][time];
+            //Region R
+            a: [0.708, 0.674, 0.655, 0.641, 0.607, 0.581],
+            b: [0.708, 0.674, 0.655, 0.641, 0.607, 0.581],
+            d: [0.708, 0.674, 0.655, 0.641, 0.607, 0.581],
+            e: [0.708, 0.674, 0.655, 0.641, 0.607, 0.581],
+            f: [0.708, 0.674, 0.655, 0.641, 0.607, 0.581],
+            i: [0.708, 0.674, 0.655, 0.641, 0.607, 0.581],
+            j: [0.708, 0.674, 0.655, 0.641, 0.607, 0.581],
+        
+            //Region S
+            c: [0.748, 0.723, 0.708, 0.698, 0.673, 0.656],
+            h: [0.748, 0.723, 0.708, 0.698, 0.673, 0.656],
+        
+            //Region T
+            g: [0.632, 0.588, 0.561, 0.543, 0.496, 0.461],
+        
+            //REgion V
+            k: [0.689, 0.658, 0.639, 0.626, 0.595, 0.572],
+            n: [0.689, 0.658, 0.639, 0.626, 0.595, 0.572],
+            o: [0.689, 0.658, 0.639, 0.626, 0.595, 0.572],
+        
+            //Region U
+            l: [0.759, 0.733, 0.717, 0.706, 0.677, 0.654],
+            m: [0.759, 0.733, 0.717, 0.706, 0.677, 0.654],
+        
+            //Region W
+            p: [0.619, 0.577, 0.552, 0.535, 0.426, 0.459],
+        
+            //Region X
+            q: [0.633, 0.572, 0.533, 0.504, 0.426, 0.358],
+        
+            //Region Y
+            r: [0.661, 0.629, 0.610, 0.598, 0.568, 0.546],
+            s: [0.661, 0.629, 0.610, 0.598, 0.568, 0.546],
+            t: [0.661, 0.629, 0.610, 0.598, 0.568, 0.546],   
+            
+            //Region z  
+            u: [0.594, 0.518, 0.469, 0.433, 0.330, 0.240]
+          }
+
+        var ret = regions[region.toLowerCase()][time];
+        console.log("Get XT Region=",region,", T=",return_periods[time]," => ", ret);
+        return ret;
     },
 
     /**
