@@ -453,7 +453,7 @@ router.get('/coords_join/:lat/:lon', function(req,res,next){
 
         const turf_point = turf.point([lon, lat]);
 
-        console.log("Turf point: ", turf_point);
+        //console.log("Turf point: ", turf_point);
 
         let city_obj = {};
         let ottobacia_obj = {};
@@ -467,13 +467,13 @@ router.get('/coords_join/:lat/:lon', function(req,res,next){
 
         //Check if point in Cities or State SP
         turf.featureEach(limite_sp_json, function(uf_sp, index){
-            console.log("UF: ", uf_sp);
+            //console.log("UF: ", uf_sp);
             if(turf.booleanPointInPolygon(turf_point, uf_sp)){
                 point_is_valid = true;
             }
         })
 
-        console.log("Point in SP: ", point_is_valid);
+        //console.log("Point in SP: ", point_is_valid);
 
         //Point Outside UF State
         if(!point_is_valid){
@@ -488,7 +488,7 @@ router.get('/coords_join/:lat/:lon', function(req,res,next){
         turf.featureEach(municipios_json, function (city, index) {
             if(turf.booleanIntersects(city.geometry, turf_point)){
                 city_obj = city;
-                console.log("City finded: ", city_obj.geometry.type);
+                //console.log("City finded: ", city_obj.geometry.type);
             }
         })
 
@@ -498,7 +498,7 @@ router.get('/coords_join/:lat/:lon', function(req,res,next){
 
             if(turf.booleanIntersects(ottobacia.geometry, turf_point)){
                 ottobacia_obj = ottobacia;
-                console.log("Ottobasin finded: ", ottobacia_obj.geometry.type);
+                //console.log("Ottobasin finded: ", ottobacia_obj.geometry.type);
             }
         });
 
@@ -507,7 +507,7 @@ router.get('/coords_join/:lat/:lon', function(req,res,next){
             //console.log("Isoline Each: ", isoline)
             if(turf.booleanIntersects(ottobacia_obj.geometry, isoline.geometry)){
                 isolines_obj.push(isoline);
-                console.log("Isolines finded: ", isoline.geometry.type);
+                //console.log("Isolines finded: ", isoline.geometry.type);
             }
         });
 
@@ -516,8 +516,11 @@ router.get('/coords_join/:lat/:lon', function(req,res,next){
             return e.properties.COBACIA == ottobacia_obj.properties.COBACIA
         });
 
+        var region_coefs = regflow.getRegionsCoeficientsByGeometry(ottobacia_obj, 1, 'kilometers', 'area');
+        //console.log("Coeficients: ", region_coefs);
+
         //Find Coeficients A..U
-        turf.featureEach(rau_json, function(rau,index){
+        /*turf.featureEach(rau_json, function(rau,index){
             if(turf.booleanIntersects(rau.geometry, turf_point)){                                                                                                                                  
                 rau_obj = rau;
                 console.log("A..U coeficients finded: ", rau_obj.geometry.type);
@@ -529,27 +532,51 @@ router.get('/coords_join/:lat/:lon', function(req,res,next){
                 rxyz_obj = rxyz;
                 console.log("XYZ Region finded: ", rxyz_obj.geometry.type);
             }
-        })
+        })*/
 
         //Calculate Anual Average Rainfall By Basin Geometry
         area_calc     = turf.area(ottobacia_obj)/1000000;
         rainfall_calc = regflow.getMeanRainfallByGeometry(ottobacia_obj)
         altitude_calc = await regflow.getElevationByCoords(lat,lon);
-        avg_discharge = regflow.calculateAvgFlowRateLongPeriod(rau_obj.properties.A_MEDIA, rau_obj.properties.B_MEDIA, rainfall_calc.avg_areas, area_calc);
-        q95_calc      = regflow.calculateQ95(rau_obj.properties.REGIAO, 14);
+
+        console.log("Elevation: ", altitude_calc);
+
+        avg_discharge = regflow.calculateAvgFlowRateLongPeriod(region_coefs.rau.coef_a, region_coefs.rau.coef_b, rainfall_calc.avg_areas, area_calc);
+
+        var avg_q95s_weight = [];
+        var avg_q710_weight = [];
+        
+
+        _.each(region_coefs.rau.bands, function(region_rau, region_rau_key){
+            //console.log(region_rau_key," => ",region_rau);
+            let q95  = regflow.calculateQ95(region_rau.properties.region, avg_discharge);
+            let q710 = regflow.calculateQ7T(region_coefs.rxyz.coef_c, region_rau.properties.region, 0, region_rau.properties.coef_a, region_rau.properties.coef_b, avg_discharge); 
+            
+            console.log("Q710["+region_rau.properties.region+"] => ",q710);
+            console.log("Q95["+region_rau.properties.region+"] => ",q95);
+
+            avg_q95s_weight.push({value: q95, weight: region_rau.properties.partial_area});
+            avg_q710_weight.push({value: q710, weight: region_rau.properties.partial_area});
+        });
+
+        q95_calc  = regflow.calculateAvgByWeight(avg_q95s_weight);
+        q710_calc = regflow.calculateAvgByWeight(avg_q710_weight);
+
+        qmin_calc = null;
+        /*q95_calc      = regflow.calculateQ95(rau_obj.properties.REGIAO, 14);
         q710_calc     = regflow.calculateQ7T(rxyz_obj.properties.C, rau_obj.properties.REGIAO, 0, rau_obj.properties.A, rau_obj.properties.B, avg_discharge);
-        qmin_calc     = regflow.calculateQmin(rau_obj.properties.REGIAO, 0, rau_obj.properties.A, rau_obj.properties.B, avg_discharge, 1);
+        qmin_calc     = regflow.calculateQmin(rau_obj.properties.REGIAO, 0, rau_obj.properties.A, rau_obj.properties.B, avg_discharge, 1);*/
 
         res.status(200).json({
             latitude: lat,
             longitude: lon,
             altitude: altitude_calc,
-            rxyz: rxyz_obj.properties,
-            rau: rau_obj.properties,
+            rxyz: region_coefs.rxyz,
+            rau: region_coefs.rau,
             isolines: rainfall_calc,
             ottotrecho: ottotrecho_obj,
             ottobacia: ottobacia_obj,
-            city: city_obj,
+            /*city: city_obj,*/
             avg_discharge: avg_discharge,
             q95:  q95_calc,
             q710: q710_calc,

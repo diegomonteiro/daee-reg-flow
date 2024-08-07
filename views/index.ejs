@@ -335,6 +335,8 @@
   var isolineGroup = L.layerGroup();
   var basinGroup   = L.layerGroup();
 
+  const bsOffcanvas = new bootstrap.Offcanvas('#results_tab')
+
   //mapbox://styles/diegomonteiro/ckzsznqn1001b14k5jqpw442k
   //mapbox://styles/diegomonteiro/ckzszx8bu001514qupk8mtfdr
   //mapbox://styles/diegomonteiro/clkwkcjsi00db01pb7ws27c3o
@@ -512,7 +514,6 @@
           //alert("Click on basin");
           //Configure to reopen offcanvas with results
           console.log("Click on basin");
-          const bsOffcanvas = new bootstrap.Offcanvas('#results_tab')
           bsOffcanvas.show()
         })
 
@@ -534,7 +535,8 @@
           console.log("Avg.Rainfall: ", avg_rainfall)
           console.log("Coefs By Region: ", region_coefs);
 
-          
+          $("#txt-coords").html(latitude+", "+longitude);
+
           $("#txt-area-drawed").html(basin_area.toFixed(2))
           //$("#txt-avg-discharge").html(qms.avg.toFixed(2))
           $("#txt-avg-rainfall").html(avg_rainfall.toFixed(2));
@@ -591,89 +593,9 @@
               var q710_final = calcAvgWeight(avg_q710_weight);
               $("#txt-q710").html(q710_final.toFixed(2));
             });
-           
-            const bsOffcanvas = new bootstrap.Offcanvas('#results_tab')
             bsOffcanvas.show();
           })
-
-          
-
-          /*$("#txt-region-au").html(coefs.rau.REGIAO);
-          $("#txt-region-xyz").html(coefs.xyz.ID);
-
-          $("#txt-region-au-a-avg").html(coefs.rau.A_MEDIA);
-          $("#txt-region-au-b-avg").html(coefs.rau.B_MEDIA);
-
-          $("#txt-region-au-coef-a").html(coefs.rau.A);
-          $("#txt-region-au-coef-b").html(coefs.rau.B);
-          $("#txt-region-xyz-coef-c").html(coefs.xyz.C);
-          
-          $("#txt-region-au-xt10").html(coefs.rau.XT10);
-          $("#txt-region-au-q95").html(coefs.rau.Q95);*/
-
-          // var reg_coefs = $.get(`/api/find_coefs/${latitude}/${longitude}`, function(coefs){
-            
-          //   console.log("Coefs: ", coefs);
-          //   //Calculate Anual Discharge
-          //   //var qms_year = regflow.calculateAvgFlowRateLongPeriod(coefs.rau.coef_a, coefs.rau.coef_b, avg_rainfall.weight, basin_area);
-          //   $.get(`/api/calculate_discharge_avg/${coefs.rau.A}/${coefs.rau.B}/${avg_rainfall}/${basin_area}`, function(qms){
-          //       const bsOffcanvas = new bootstrap.Offcanvas('#results_tab')
-          //       bsOffcanvas.show()
-                
-          //       console.log(qms)
-          //       $("#txt-area-drawed").html(basin_area.toFixed(2))
-          //       $("#txt-avg-discharge").html(qms.avg.toFixed(2))
-          //       $("#txt-avg-rainfall").html(avg_rainfall.toFixed(2))
-
-          //       $("#txt-region-au").html(coefs.rau.REGIAO);
-          //       $("#txt-region-xyz").html(coefs.xyz.ID);
-
-          //       $("#txt-region-au-a-avg").html(coefs.rau.A_MEDIA);
-          //       $("#txt-region-au-b-avg").html(coefs.rau.B_MEDIA);
-
-          //       $("#txt-region-au-coef-a").html(coefs.rau.A);
-          //       $("#txt-region-au-coef-b").html(coefs.rau.B);
-          //       $("#txt-region-xyz-coef-c").html(coefs.xyz.C);
-                
-          //       $("#txt-region-au-xt10").html(coefs.rau.XT10);
-          //       $("#txt-region-au-q95").html(coefs.rau.Q95);
-
-          //       $.get(`/api/calculate_q95/${coefs.rau.REGIAO}/${qms.avg}`, function(res_q95){
-          //         console.log("Q95: ", res_q95);
-          //         $("#txt-q95").html(res_q95.q95.toFixed(2));
-          //       });
-
-          //       $.get(`/api/calculate_q7/${coefs.rau.REGIAO}/${coefs.xyz.C}/${coefs.rau.A}/${coefs.rau.B}/${qms.avg}`, function(q7s){
-          //         console.log("Q7s => ", q7s);
-          //         $("#txt-q710").html(q7s.discharges[0].discharge.toFixed(2))
-                  
-          //         Highcharts.chart('chart_q7t', {
-          //           title: null,
-          //           yAxis: {
-          //             title: { text: '' }
-          //           },
-          //           credits: { enabled: false},
-          //           xAxis: {
-          //           },
-          //           legend: { enabled: false},
-          //           series: [
-          //             {name: 'Vazão (m³/s)', data: q7s.discharges.map((x) => [x.return_period,parseFloat(x.discharge.toFixed(3))])}
-          //           ]
-          //         })
-          //       })
-
-          //       $.get(`/api/calculate_qper/${coefs.rau.REGIAO}/${qms.avg}`, function(pers){
-          //         console.log("Permancences: ", pers);
-          //       })
-          //       // $.get(`/api/calculate_q7/0/${coefs.rau.REGIAO}/${coefs.xyz.C}/${coefs.rau.A}/${coefs.rau.B}/${qms.avg}`, function(res_q7){
-          //       //   console.log("Q7 => ", res_q7);
-          //       // });
-
-          //   })
-          // })
-
         })
-
       })
     }
   })
@@ -898,11 +820,21 @@
       //Clear all layer groups
       basinGroup.clearLayers();
       isolineGroup.clearLayers();
-
-      //map.setView([latitude, longitude], 12)
-      basin = L.geoJSON(response.ottobacia);
-      basinGroup.addLayer(basin);
       
+      //map.setView([latitude, longitude], 12)
+      basin = L.geoJSON(response.ottobacia, {
+        onEachFeature: function(feature, layer){
+          layer.on({
+            click: function(e){
+              console.log("Click basin => ", e);
+              bsOffcanvas.show();
+            }
+          })
+        }
+      });
+
+      basinGroup.addLayer(basin);
+
       response.isolines.bands.forEach(band => {
         isolineGroup.addLayer(L.geoJSON(band,{
             onEachFeature: function(feature, layer){
@@ -919,9 +851,50 @@
           }))
       });
 
-      map.fitBounds(basin.getBounds());
+      var basin_area = turf.area(basin.toGeoJSON())/1000000;
+      
+      $("#txt-coords").html(latitude+", "+longitude);
 
+
+      console.log("Ottotrecho:", _.first(response.ottotrecho).properties.COBACIA);
+      var basin_obj = _.first(response.ottotrecho);
+      var basin_name = "";
+      
+      if(basin_obj.properties.NOCOMPLETO == null){
+        basin_name = basin_obj.properties.COBACIA+" - Sem nome";  
+      }
+      else{
+        basin_name = basin_obj.properties.COBACIA+" - "+basin_obj.properties.NOCOMPLETO;
+      }
+
+      $("#txt-basin").html(basin_name);
+
+      $("#txt-area-drawed").html(basin_area.toFixed(2))
+      $("#txt-avg-rainfall").html(response.isolines.avg_areas.toFixed(2));
+
+      $("#txt-region-au-a-avg").html(response.rau.avg_a);
+      $("#txt-region-au-b-avg").html(response.rau.avg_b);
+
+      $("#txt-region-au-coef-a").html(response.rau.coef_a);
+      $("#txt-region-au-coef-b").html(response.rau.coef_b);
+      $("#txt-region-xyz-coef-c").html(response.rxyz.coef_c);
+
+      txt_regions_au  = _.map(response.rau.bands, function(o){ return o.properties.region+" ("+o.properties.partial_area.toFixed(2)+"km²)"})
+      txt_regions_xyz = _.map(response.rxyz.bands, function(o){ return o.properties.id+" ("+o.properties.partial_area.toFixed(2)+"km²)"}) 
+
+      $("#txt-region-au").html(txt_regions_au.join(", "));
+      $("#txt-region-xyz").html(txt_regions_xyz.join(", "));
+
+      bsOffcanvas.show();
+
+      $("#txt-avg-discharge").html(response.avg_discharge.toFixed(2));
+      $("#txt-q95").html(response.q95.toFixed(2));
+      $("#txt-q710").html(response.q710.toFixed(2));
+
+      map.fitBounds(basin.getBounds());
       modal_calc_q710.hide();
+
+
     })
   }
 

@@ -56,7 +56,7 @@ const regflow = {
             var pts = turf.pointsWithinPolygon(point_grids, rauFeature);
 
             if(pts.features.length > 0){
-                console.log("Points in Polygon: ", pts.length);
+                //console.log("Points in Polygon: ", pts.length);
 
                 turf.featureEach(basin_border_geo, function(basinFeature, basinIndex){
                     const basinType = turf.getType(basinFeature)
@@ -70,7 +70,7 @@ const regflow = {
                     var rau_band = turf.intersect(basinFeature, rauFeature);
 
                     if(rau_band){
-                        console.log("Rau Band Valid: ", rau_band);
+                        //console.log("Rau Band Valid: ", rau_band);
                         var partial_area = turf.area(rau_band.geometry)/1000000;
                         var avg_rau_obj = {
                             id: rauFeature.properties.ID,
@@ -86,7 +86,7 @@ const regflow = {
                         
                         //Weight areas coefs
                         rau_avg_a_weighted_areas.push({value: avg_rau_obj.avg_a, weight: partial_area});
-                        rau_avg_b_weighted_areas.push({value: avg_rau_obj.avg_a, weight: partial_area});
+                        rau_avg_b_weighted_areas.push({value: avg_rau_obj.avg_b, weight: partial_area});
                         rau_avg_xt10_weigted_areas.push({value: avg_rau_obj.xt_10, weight: partial_area});
                         rau_avg_coef_a_weighted_areas.push({value: avg_rau_obj.coef_a, weight: partial_area});
                         rau_avg_coef_b_weighted_areas.push({value: avg_rau_obj.coef_b, weight: partial_area});
