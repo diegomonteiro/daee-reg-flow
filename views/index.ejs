@@ -537,7 +537,20 @@
           
           $("#txt-area-drawed").html(basin_area.toFixed(2))
           //$("#txt-avg-discharge").html(qms.avg.toFixed(2))
-          $("#txt-avg-rainfall").html(avg_rainfall.toFixed(2))
+          $("#txt-avg-rainfall").html(avg_rainfall.toFixed(2));
+
+          $("#txt-region-au-a-avg").html(region_coefs.rau.a);
+          $("#txt-region-au-b-avg").html(region_coefs.rau.b);
+
+          $("#txt-region-au-coef-a").html(region_coefs.rau.coef_a);
+          $("#txt-region-au-coef-b").html(region_coefs.rau.coef_b);
+          $("#txt-region-xyz-coef-c").html(region_coefs.rxyz.coef_c);
+
+          txt_regions_au  = _.map(region_coefs.rau.bands, function(o){ return o.properties.region+" ("+o.properties.partial_area.toFixed(2)+"km²)"})
+          txt_regions_xyz = _.map(region_coefs.rxyz.bands, function(o){ return o.properties.id+" ("+o.properties.partial_area.toFixed(2)+"km²)"}) 
+
+          $("#txt-region-au").html(txt_regions_au.join(", "));
+          $("#txt-region-xyz").html(txt_regions_xyz.join(", "));
 
           $.get(`/api/calculate_discharge_avg/${region_coefs.rau.a}/${region_coefs.rau.b}/${avg_rainfall}/${basin_area}`, function(qms){
             console.log("Qms: ", qms);
