@@ -1,5 +1,6 @@
 var turf    = require('@turf/turf');
 var _       = require('lodash');
+var debug   = require('debug')('daee-reg-flow:regflow');
 
 var municipios_json  = require('../public/layers/municipios.json');
 var ottobacias_json  = require('../public/layers/ottobacias.json');
@@ -47,14 +48,7 @@ const regflow = {
 
         //First Get Rau Object
         turf.featureEach(rau_json, function(rauFeature, rauIndex){
-            //console.log("RAU Object: ", rauFeature);
-            //Check points on polygon
-            var pts = turf.pointsWithinPolygon(point_grids, rauFeature);
-
-            if(pts.features.length > 0){
-                //console.log("Points in Polygon: ", pts.length);
-
-                turf.featureEach(basin_border_geo, function(basinFeature, basinIndex){
+            turf.featureEach(basin_border_geo, function(basinFeature, basinIndex){
                     //Get a intersection of BasinPolygon to IsobandPolygon
                     var rau_band = turf.intersect(basinFeature, rauFeature);
 
@@ -83,16 +77,11 @@ const regflow = {
 
                         rau_bands.push(rau_band);                      
                     }
-                })
-            }
+            });
         });
 
         turf.featureEach(rxyz_json, function(rxyzFeature, rxyzIndex){
-            //console.log("RXYZ Object: ", rxyzFeature);
-            var pts = turf.pointsWithinPolygon(point_grids, rxyzFeature);
-
-            if(pts.features.length > 0){
-                turf.featureEach(basin_border_geo, function(basinFeature, basinIndex){
+            turf.featureEach(basin_border_geo, function(basinFeature, basinIndex){
                     //Get a intersection of BasinPolygon to IsobandPolygon
                     var rxyz_band = turf.intersect(basinFeature, rxyzFeature);
 
@@ -104,18 +93,12 @@ const regflow = {
                         rxyz_avg_weighted_areas.push({value: avg_rxyz_obj.coef_c, weight: partial_area});
                         rxyz_bands.push(rxyz_band);                      
                     }
-                })
-            }
+            });
         });
 
         turf.featureEach(rainfallLayer, function(rainFeature, rainIndex){
-            //Check point inside Rainfall Band
             var pts = turf.pointsWithinPolygon(point_grids, rainFeature);
-
-            //Check if points exist
-            if(pts.features.length > 0){
-                //Each Basin Features to Check
-                turf.featureEach(basin_border_geo, function(basinFeature, basinIndex){
+            turf.featureEach(basin_border_geo, function(basinFeature, basinIndex){
                     //Get a intersection of BasinPolygon to IsobandPolygon
                     var isoband = turf.intersect(basinFeature, rainFeature);
                     //console.log("Isoband: ", isoband);
@@ -132,8 +115,8 @@ const regflow = {
                         rain_avg_weighted_areas.push({value: avg_rain_obj.rain, weight: partial_area});
                         isobands.push(isoband);                      
                     }
-                })
-
+            });
+            if(pts.features.length > 0){
                 var pts_tags = turf.tag(pts, rainFeature,'ID','rain');
                 var avg_rain = _.meanBy(pts_tags.features, function(o){ return o.properties.rain });
                 rain_avg_weighted_points.push({value: avg_rain, weight: pts_tags.features.length});
@@ -184,31 +167,18 @@ const regflow = {
         let isobands = [];
 
         turf.featureEach(rainfallLayer, function(rainFeature, rainIndex){
-            //Check point inside Rainfall Band
             var pts = turf.pointsWithinPolygon(point_grids, rainFeature);
-
-            //Check if points exist
+            turf.featureEach(basin_border_geo, function(basinFeature, basinIndex){
+                var isoband = turf.intersect(basinFeature, rainFeature);
+                if(isoband){
+                    var partial_area = turf.area(isoband.geometry)/1000000;
+                    var avg_rain_obj = {rain: rainFeature.properties.ID, partial_area: partial_area};
+                    isoband.properties = _.merge(avg_rain_obj, basinFeature.properties);
+                    rain_avg_weighted_areas.push({value: avg_rain_obj.rain, weight: partial_area});
+                    isobands.push(isoband);
+                }
+            });
             if(pts.features.length > 0){
-                //Each Basin Features to Check
-                turf.featureEach(basin_border_geo, function(basinFeature, basinIndex){
-                    //Get a intersection of BasinPolygon to IsobandPolygon
-                    var isoband = turf.intersect(basinFeature, rainFeature);
-                    //console.log("Isoband: ", isoband);
-
-                    if(isoband){
-                        var partial_area = turf.area(isoband.geometry)/1000000;
-                        var avg_rain_obj = {rain: rainFeature.properties.ID, partial_area: partial_area};
-                        
-                        //Save's calculated partial area into isoband
-                        isoband.properties = _.merge(avg_rain_obj, basinFeature.properties); 
-                        
-                        //console.log("Isoband Properties: ", _.merge(avg_rain_obj, basinFeature.properties));
-
-                        rain_avg_weighted_areas.push({value: avg_rain_obj.rain, weight: partial_area});
-                        isobands.push(isoband);                      
-                    }
-                })
-
                 var pts_tags = turf.tag(pts, rainFeature,'ID','rain');
                 var avg_rain = _.meanBy(pts_tags.features, function(o){ return o.properties.rain });
                 rain_avg_weighted_points.push({value: avg_rain, weight: pts_tags.features.length});
@@ -227,16 +197,12 @@ const regflow = {
      * Method to calculate average by weight
      */
     calculateAvgByWeight(values){
-        var total_weight = _.sumBy(values, function(o){ return o.weight });
-        if (!Number.isFinite(total_weight) || total_weight <= 0) return null;
-        var aux_vals = [];
-
-        //$.each(values, function(k,v){
-        _.each(values, function(v){
-            aux_vals.push(v.value * v.weight);
+        const validValues = (Array.isArray(values) ? values : []).filter(function(item) {
+            return item && Number.isFinite(Number(item.value)) && Number.isFinite(Number(item.weight)) && Number(item.weight) > 0;
         });
-
-        return _.sum(aux_vals)/total_weight;
+        var total_weight = _.sumBy(validValues, function(o){ return Number(o.weight) });
+        if (!Number.isFinite(total_weight) || total_weight <= 0) return null;
+        return _.sumBy(validValues, function(item) { return Number(item.value) * Number(item.weight); }) / total_weight;
     },
 
     /**
@@ -252,7 +218,7 @@ const regflow = {
      */
     calculateAvgFlowRateLongPeriod(coef_a, coef_b, avg_rainfall, area){
         var ret = ((coef_a+(coef_b*avg_rainfall))*area)/1000;
-        console.log("Qavg(m³/s): a:",coef_a,", b:",coef_b,", p:",avg_rainfall,", area:",area," =>>> Result: ", ret);
+        debug('Qavg(m³/s): a=%s b=%s p=%s area=%s result=%s', coef_a, coef_b, avg_rainfall, area, ret);
         return ret;
     },
 
@@ -264,7 +230,7 @@ const regflow = {
      */
     calculateQ95(region, qls_m3s, freqIndex=14){
         var qfs = this.getPermanenceCurvesByRegionFreqIndex(region, freqIndex);
-        console.log("Permanence Curve ["+region+"]["+freqIndex+"] => "+qfs);
+        debug('Permanence Curve [%s][%s] => %s', region, freqIndex, qfs);
         var ret = qfs * qls_m3s;
         return ret;
     },
@@ -297,16 +263,11 @@ const regflow = {
     calculateQ7T(coef_c, region, t, val_a, val_b, qls_m3s){
         var xt  = this.getXTCoef(region, t);
 
-        console.log("XT Getted: ", xt);
-
-        console.log("Coef.C: ", coef_c);
-        console.log("Val.a: ", val_a);
-        console.log("Val.b: ", val_b);
-        console.log("Qls: ", qls_m3s);
+        debug('Q7T inputs: XT=%s C=%s a=%s b=%s Qls=%s', xt, coef_c, val_a, val_b, qls_m3s);
 
         var ret = coef_c * xt * (val_a + val_b) * qls_m3s;
 
-        console.log("Q7,"+return_periods[t]+" => "+ret);
+        debug('Q7,%s => %s', return_periods[t], ret);
         return ret;
     },
 
@@ -323,9 +284,9 @@ const regflow = {
      */
     calculateVolumeRegularization(qf,region,t, coef_a, coef_b, qls_m3s, d_months=1){
         var xt = this.getXTCoef(region,t);
-        console.log("Coef XT: ", xt);
+        debug('Regularization XT: %s', xt);
         var ret = (Math.pow((qf-(xt*coef_a*qls_m3s)), 2)/(4*xt*coef_b*qls_m3s))*(d_months * K);
-        console.log("Max.Vol.Regularization: "+ret);
+        debug('Max.Vol.Regularization: %s', ret);
         return ret;
     },
 
@@ -342,7 +303,7 @@ const regflow = {
     calculateCriticalDuration(qf,region,t,coef_a,coef_b,qls_m3s){
         var xt = this.getXTCoef(region,t);
         var ret = (qf-(xt*coef_a*qls_m3s))/(2*xt*coef_b*qls_m3s);
-        console.log("Critical.Duration: "+ret);
+        debug('Critical.Duration: %s', ret);
         return ret;
     },
 
@@ -384,7 +345,9 @@ const regflow = {
         u: {param_a: -4.62, param_b: 0.0098}
         }
     
-        return regions_rain[region.toLowerCase()];
+        const normalizedRegion = String(region || '').toLowerCase();
+        if (!regions_rain[normalizedRegion]) throw new RangeError('Invalid region');
+        return regions_rain[normalizedRegion];
     
     },
 
@@ -394,9 +357,7 @@ const regflow = {
      * @param {*} time 
      */
     getXTCoefByRegions(regions, time){
-        var rets = [];
-
-        var regions = {
+        const regionTable = {
       
             //Region R
             a: [0.708, 0.674, 0.655, 0.641, 0.607, 0.581],
@@ -438,11 +399,12 @@ const regflow = {
             u: [0.594, 0.518, 0.469, 0.433, 0.330, 0.240]
           }
 
-        _.each(regions, function(values){
-            rets.push(values[time]);
-        });
-
-        return _.mean(rets);
+        const periodIndex = Number(time);
+        const requestedRegions = (Array.isArray(regions) ? regions : [regions]).map(region => String(region || '').toLowerCase());
+        if (!Number.isInteger(periodIndex) || periodIndex < 0 || periodIndex >= return_periods.length || requestedRegions.length === 0 || requestedRegions.some(region => !regionTable[region])) {
+            throw new RangeError('Invalid region or return period index');
+        }
+        return _.mean(requestedRegions.map(region => regionTable[region][periodIndex]));
     },
 
     /**
@@ -499,7 +461,7 @@ const regflow = {
             throw new RangeError('Invalid region or return period index');
         }
         var ret = regions[normalizedRegion][periodIndex];
-        console.log("Get XT Region=",region,", T=",return_periods[time]," => ", ret);
+        debug('Get XT Region=%s T=%s => %s', region, return_periods[time], ret);
         return ret;
     },
 
@@ -535,7 +497,9 @@ const regflow = {
       
         }
       
-        return regions[region.toLowerCase()];
+        const normalizedRegion = String(region || '').toLowerCase();
+        if (!regions[normalizedRegion]) throw new RangeError('Invalid region');
+        return regions[normalizedRegion];
     },
 
     /**
@@ -567,7 +531,9 @@ const regflow = {
             u: [2.471, 2.156, 1.751, 1.468, 1.324, 1.109, 0.880, 0.781, 0.674, 0.581, 0.517, 0.481, 0.429, 0.380, 0.319, 0.241]
         };
     
-        return regions[region.toLowerCase()];
+        const normalizedRegion = String(region || '').toLowerCase();
+        if (!regions[normalizedRegion]) throw new RangeError('Invalid region');
+        return regions[normalizedRegion];
     },
 
     /**
@@ -576,7 +542,9 @@ const regflow = {
      * @param {int} freqIndex {p5=0,p10=1,p15=2,p20=3,p25=4,p30=5,p40=6,p50=7,p60=8,p70=9,p80=10,p85=11,p90=12,p95=13,p100=14}
      */
     getPermanenceCurvesByRegionFreqIndex(region,freqIndex){
-        return this.getPermanenceCurvesByRegion(region)[freqIndex];
+        const index = Number(freqIndex);
+        if (!Number.isInteger(index) || index < 0 || index >= pps.length) throw new RangeError('Invalid permanence frequency index');
+        return this.getPermanenceCurvesByRegion(region)[index];
     },
 
     /**
@@ -584,14 +552,16 @@ const regflow = {
      */
     async getElevationByCoords(lat,lon){
         var token = process.env.MAPBOX_TOKEN;
-        if (!token || typeof fetch !== 'function') return null;
+        const latitude = Number(lat);
+        const longitude = Number(lon);
+        if (!token || typeof fetch !== 'function' || !Number.isFinite(latitude) || latitude < -90 || latitude > 90 || !Number.isFinite(longitude) || longitude < -180 || longitude > 180) return null;
 
         const controller = new AbortController();
         const timeout = setTimeout(() => controller.abort(), 4000);
         let query;
         try {
             query = await fetch(
-                `https://api.mapbox.com/v4/mapbox.mapbox-terrain-v2/tilequery/${lon},${lat}.json?layers=contour&limit=50&access_token=${token}`,
+                `https://api.mapbox.com/v4/mapbox.mapbox-terrain-v2/tilequery/${longitude},${latitude}.json?layers=contour&limit=50&access_token=${encodeURIComponent(token)}`,
                 { method: 'GET', signal: controller.signal }
             );
         } catch (error) {
@@ -602,13 +572,18 @@ const regflow = {
 
         if (!query.ok) return null;
     
-        const data = await query.json();
+        let data;
+        try {
+            data = await query.json();
+        } catch (error) {
+            return null;
+        }
         // Get all the returned features.
-        const allFeatures = data.features;
+        const allFeatures = Array.isArray(data && data.features) ? data.features : [];
         //console.log(allFeatures);
         // For each returned feature, add elevation data to the elevations array.
         const elevations = allFeatures
-            .map((feature) => Number(feature.properties.ele))
+            .map((feature) => Number(feature && feature.properties && feature.properties.ele))
             .filter(Number.isFinite);
         if (elevations.length === 0) return null;
         //console.log(elevations);

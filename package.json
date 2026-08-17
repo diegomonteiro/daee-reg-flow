@@ -9,7 +9,8 @@
     "start": "node ./bin/www",
     "dev": "nodemon ./bin/www",
     "test": "node --test",
-    "check": "node --check app.js && node --check routes/apis.js && node --check models/regflow.js"
+    "test:coverage": "node --experimental-test-coverage --test",
+    "check": "node --check app.js && node --check bin/www && node --check routes/index.js && node --check routes/apis.js && node --check models/regflow.js && node --check test/api.test.js && node --check test/regflow.test.js"
   },
   "dependencies": {
     "@turf/turf": "^6.5.0",

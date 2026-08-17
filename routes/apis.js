@@ -1,6 +1,7 @@
 var express = require('express');
 var router  = express.Router();
 var turf    = require('@turf/turf');
+var debug   = require('debug')('daee-reg-flow:api');
 
 var _ = require('lodash');
 
@@ -34,6 +35,36 @@ function findContainingFeature(index, point, lon, lat) {
         isPointInBounds(lon, lat, item.bbox) && turf.booleanPointInPolygon(point, item.feature)
     );
     return candidate ? candidate.feature : null;
+}
+
+function boundsIntersect(first, second) {
+    return first[0] <= second[2] && first[2] >= second[0] && first[1] <= second[3] && first[3] >= second[1];
+}
+
+function getIntersectingBasins(geometry, drawnAreaKm2) {
+    const geometryBounds = turf.bbox(geometry);
+    return basinBounds.reduce((matches, item) => {
+        if (!boundsIntersect(geometryBounds, item.bbox)) return matches;
+        let intersection;
+        try {
+            if (!turf.booleanIntersects(geometry, item.feature)) return matches;
+            intersection = turf.intersect(geometry, item.feature);
+        } catch (error) {
+            return matches;
+        }
+        if (!intersection) return matches;
+        const overlapAreaKm2 = turf.area(intersection) / 1000000;
+        if (!Number.isFinite(overlapAreaKm2) || overlapAreaKm2 < 0.000001) return matches;
+        const basinAreaKm2 = turf.area(item.feature) / 1000000;
+        intersection.properties = {
+            COBACIA: item.feature.properties.COBACIA,
+            overlap_area_km2: overlapAreaKm2,
+            drawn_area_percent: Math.min(overlapAreaKm2 / drawnAreaKm2 * 100, 100),
+            basin_area_percent: basinAreaKm2 > 0 ? Math.min(overlapAreaKm2 / basinAreaKm2 * 100, 100) : null
+        };
+        matches.push(intersection);
+        return matches;
+    }, []).sort((first, second) => second.properties.drawn_area_percent - first.properties.drawn_area_percent);
 }
 
 function limitCoordinateRequests(req, res, next) {
@@ -183,6 +214,7 @@ async function calculateGeometry(geometry, options = {}) {
     const center = turf.centroid(geometry).geometry.coordinates;
     const altitude = options.includeElevation === false ? null : await regflow.getElevationByCoords(center[1], center[0]);
     const streamSegments = await enrichStreamSegments(options.ottotrecho || []);
+    const intersectingBasins = options.includeBasinOverlaps ? getIntersectingBasins(geometry, areaKm2) : [];
     return {
         source: options.source || 'geometry',
         latitude: center[1],
@@ -194,6 +226,7 @@ async function calculateGeometry(geometry, options = {}) {
         isolines: rainfall,
         ottotrecho: streamSegments,
         ottobacia: geometry,
+        intersecting_basins: intersectingBasins,
         avg_discharge: flows.avg_discharge,
         q95: flows.q95,
         q710: flows.q710,
@@ -338,11 +371,11 @@ router.get('/calculate_max_volume_regularization/:qf/:region/:t/:a/:b/:qls_m3s/:
         var q  = parseFloat(req.params['qls_m3s']);
         var months  = parseInt(req.params['months']);
 
-        console.log("Qf: "+qf+" - A: "+a+" - B: "+b+" - Qa:"+q+" - months: "+months);
+        debug('Qf=%s A=%s B=%s Qa=%s months=%s', qf, a, b, q, months);
         //var ret = (Math.pow(qf-(xt*a*q),2)/(4*xt*b*q))*k;
         var ret = regflow.calculateVolumeRegularization(qf,region,time,a,b,q,months);
 
-        console.log("Max: "+ret);
+        debug('Max=%s', ret);
 
         res.status(200).json({
             volume_m3: ret,
@@ -366,7 +399,7 @@ router.get('/calculate_discharge_avg/:coef_a/:coef_b/:avg_rainfall/:area_km2', f
 
         var ret = regflow.calculateAvgFlowRateLongPeriod(coef_a, coef_b, avg_rainfall, area_km2);
 
-        console.log("AVG.discharge => "+ret);
+        debug('AVG.discharge => %s', ret);
 
         res.status(200).json({
             avg: ret,
@@ -402,11 +435,11 @@ router.get('/calculate_minimal_discharge/:region/:time/:a/:b/:dmonth/:qls_m3s', 
         var a       = parseFloat(req.params['a']);
         var b       = parseFloat(req.params['b']);
 
-        console.log("XT: ", xt);
+        debug('XT=%s', xt);
 
         var ret = regflow.calculateQmin(region, time, a, b, qls_m3s, dm);
 
-        console.log("Calculate Minimal Anual Discharge: ",xt,", ",a,", ",b,", ",dm," => ",ret);
+        debug('Calculate Minimal Annual Discharge: XT=%s a=%s b=%s months=%s result=%s', xt, a, b, dm, ret);
 
         res.status(200).json({
             qmin: ret,
@@ -500,7 +533,7 @@ router.get("/calculate_q7/:region/:c/:val_a/:val_b/:qls_m3s/:area_km2", function
 
         var rets = [];
         //var ret = regflow.calculateQ7T(coef_c, region, time, val_a, val_b, qls_m3s);
-        console.log("Return Periods: ", return_periods);
+        debug('Return Periods: %o', return_periods);
         for(var i = 0; i < return_periods.length; i++){
             rets.push({return_period: return_periods[i], discharge: regflow.calculateQ7T(coef_c, region, i, val_a, val_b, qls_m3s), area_km2: area_km2});
         }
@@ -540,7 +573,7 @@ router.get('/find_coefs/:lat/:lon', function(req,res,next){
         var lat = parseFloat(req.params['lat']);
         var lon = parseFloat(req.params['lon']);
 
-        console.log("Coordinates: ",lat,"<>",lon);
+        debug('Coordinates: %s <> %s', lat, lon);
 
         var turf_point = turf.point([lon, lat]);
 
@@ -551,14 +584,14 @@ router.get('/find_coefs/:lat/:lon', function(req,res,next){
         turf.featureEach(rau_json, function(rau,index){
             if(turf.booleanIntersects(rau.geometry, turf_point)){                                                                                                                                  
                 rau_obj = rau;
-                console.log("A..U coeficients finded: ", rau_obj.properties);
+                debug('A..U coefficients found: %o', rau_obj.properties);
             }
         });
 
         turf.featureEach(rxyz_json, function(rxyz,index){
             if(turf.booleanIntersects(rxyz.geometry, turf_point)){
                 rxyz_obj = rxyz;
-                console.log("XYZ Region finded: ", rxyz_obj.properties);
+                debug('XYZ Region found: %o', rxyz_obj.properties);
             }
         })
 
@@ -588,7 +621,7 @@ router.get('/find_coefs_by_region/:lat/:lon', function(req,res,next){
         let rau_obj = {};
         let rxyz_obj = {};
 
-        console.log("Coordinates: ",lat,"<>",lon);
+        debug('Coordinates: %s <> %s', lat, lon);
 
         //Check if point in São Paulo
         //Check if point in Cities or State SP
@@ -599,7 +632,7 @@ router.get('/find_coefs_by_region/:lat/:lon', function(req,res,next){
             }
         })
 
-        console.log("Point in SP: ", point_is_valid);
+        debug('Point in SP: %s', point_is_valid);
 
         //Point Outside UF State
         if(!point_is_valid){
@@ -619,7 +652,7 @@ router.get('/find_coefs_by_region/:lat/:lon', function(req,res,next){
                 //console.log("Isoline Each: ", isoline)
                 if(turf.booleanIntersects(ottobacia_obj.geometry, isoline.geometry)){
                     isolines_obj.push(isoline);
-                    console.log("Isolines finded: ", isoline.geometry.type);
+                    debug('Isolines found: %s', isoline.geometry.type);
                 }
             });
 
@@ -628,7 +661,7 @@ router.get('/find_coefs_by_region/:lat/:lon', function(req,res,next){
 
             var ret = regflow.getRegionsCoeficientsByGeometry(ottobacia_obj, 1, { units: 'kilometers' }, 'area');
 
-            console.log("Result: ", ret);
+            debug('Result: %o', ret);
 
             res.status(200).json({
                 ottobacia: ottobacia_obj,
@@ -745,7 +778,7 @@ router.post('/isohyet_simulation', limitCoordinateRequests, function(req, res, n
 router.post('/geometry_calculate', limitCoordinateRequests, function(req, res, next) {
     async function run() {
         const validated = validateBasinGeometry(req.body && req.body.geometry);
-        const response = await calculateGeometry(validated.geometry, { source: 'drawn-geometry', includeElevation: false });
+        const response = await calculateGeometry(validated.geometry, { source: 'drawn-geometry', includeElevation: false, includeBasinOverlaps: true });
         res.status(200).json(response);
     }
     run().catch(next);
@@ -763,7 +796,7 @@ router.get('/coords_join/:lat/:lon', limitCoordinateRequests, function(req,res,n
             return res.status(200).json(cached.value);
         }
 
-        console.log("Coordinates: ",lat,"<>",lon);
+        debug('Coordinates: %s <> %s', lat, lon);
 
         const turf_point = turf.point([lon, lat]);
 
@@ -820,14 +853,14 @@ router.get('/coords_join/:lat/:lon', limitCoordinateRequests, function(req,res,n
         /*turf.featureEach(rau_json, function(rau,index){
             if(turf.booleanIntersects(rau.geometry, turf_point)){                                                                                                                                  
                 rau_obj = rau;
-                console.log("A..U coeficients finded: ", rau_obj.geometry.type);
+                debug('A..U coefficients found: %s', rau_obj.geometry.type);
             }
         });
 
         turf.featureEach(rxyz_json, function(rxyz,index){
             if(turf.booleanIntersects(rxyz.geometry, turf_point)){
                 rxyz_obj = rxyz;
-                console.log("XYZ Region finded: ", rxyz_obj.geometry.type);
+                debug('XYZ Region found: %s', rxyz_obj.geometry.type);
             }
         })*/
 
@@ -836,7 +869,7 @@ router.get('/coords_join/:lat/:lon', limitCoordinateRequests, function(req,res,n
         var rainfall_calc = regflow.getMeanRainfallByGeometry(ottobacia_obj);
         var altitude_calc = await regflow.getElevationByCoords(lat,lon);
 
-        console.log("Elevation: ", altitude_calc);
+        debug('Elevation: %o', altitude_calc);
 
         if ([region_coefs.rau.coef_a, region_coefs.rau.coef_b, region_coefs.rxyz.coef_c, rainfall_calc.avg_areas].some(value => !Number.isFinite(value))) {
             return res.status(422).json({ error: 'Unable to calculate regional coefficients for this basin' });
@@ -853,8 +886,8 @@ router.get('/coords_join/:lat/:lon', limitCoordinateRequests, function(req,res,n
             let q95  = regflow.calculateQ95(region_rau.properties.region, avg_discharge);
             let q710 = regflow.calculateQ7T(region_coefs.rxyz.coef_c, region_rau.properties.region, 0, region_rau.properties.coef_a, region_rau.properties.coef_b, avg_discharge); 
             
-            console.log("Q710["+region_rau.properties.region+"] => ",q710);
-            console.log("Q95["+region_rau.properties.region+"] => ",q95);
+            debug('Q710[%s] => %s', region_rau.properties.region, q710);
+            debug('Q95[%s] => %s', region_rau.properties.region, q95);
 
             avg_q95s_weight.push({value: q95, weight: region_rau.properties.partial_area});
             avg_q710_weight.push({value: q710, weight: region_rau.properties.partial_area});

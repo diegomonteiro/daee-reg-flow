@@ -29,6 +29,9 @@ test('serves the main map interface with security headers', async () => {
   assert.match(contentSecurityPolicy, /default-src 'self'/);
   assert.match(contentSecurityPolicy, /connect-src[^;]*https:\/\/unpkg\.com/);
   assert.match(html, /REG-FLOW/);
+  assert.match(html, /SP-%C3%81guas-Branco\.png/);
+  assert.match(html, /SP-ÁGUAS — REG-FLOW/);
+  assert.match(html, /function startNewConsultation\(\)/);
   assert.match(html, /Calcular vazão/);
 });
 
@@ -95,7 +98,67 @@ test('calculates regionalization from the exact user-drawn polygon', async () =>
   assert.equal(data.source, 'drawn-geometry');
   assert.deepEqual(data.ottobacia.geometry.coordinates, geometry.geometry.coordinates);
   assert.ok(data.area_km2 > 0);
+  assert.ok(data.intersecting_basins.length > 0);
+  assert.ok(data.intersecting_basins.every(feature => {
+    const properties = feature.properties;
+    return properties.COBACIA && properties.overlap_area_km2 > 0 && properties.drawn_area_percent > 0 && properties.drawn_area_percent <= 100 && properties.basin_area_percent > 0 && properties.basin_area_percent <= 100;
+  }));
+  const coveredPercentage = data.intersecting_basins.reduce((sum, feature) => sum + feature.properties.drawn_area_percent, 0);
+  assert.ok(coveredPercentage > 99 && coveredPercentage <= 100.01, `Cobertura das ottobacias: ${coveredPercentage}%`);
   assert.ok([data.isolines.avg_areas, data.avg_discharge, data.q95, data.q710].every(Number.isFinite));
+});
+
+test('rejects invalid, self-intersecting and out-of-state basin geometries', async () => {
+  const cases = [
+    {
+      geometry: { type: 'Feature', properties: {}, geometry: { type: 'LineString', coordinates: [[-46.7, -23.6], [-46.6, -23.5]] } },
+      status: 400,
+      error: /Polygon or MultiPolygon/
+    },
+    {
+      geometry: { type: 'Feature', properties: {}, geometry: { type: 'Polygon', coordinates: [[[-46.70,-23.62],[-46.58,-23.52],[-46.70,-23.52],[-46.58,-23.62],[-46.64,-23.66],[-46.70,-23.62]]] } },
+      status: 422,
+      error: /self-intersections/
+    },
+    {
+      geometry: { type: 'Feature', properties: {}, geometry: { type: 'Polygon', coordinates: [[[-43.3,-23.1],[-43.2,-23.1],[-43.2,-23],[-43.3,-23],[-43.3,-23.1]]] } },
+      status: 400,
+      error: /State of São Paulo/
+    }
+  ];
+  for (const item of cases) {
+    const response = await fetch(`${baseUrl}/api/geometry_calculate`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ geometry: item.geometry }) });
+    const data = await response.json();
+    assert.equal(response.status, item.status, JSON.stringify(data));
+    assert.match(data.error, item.error);
+  }
+});
+
+test('validates uploaded isohyet properties, coverage and scenario limits', async () => {
+  const geometry = { type: 'Feature', properties: {}, geometry: { type: 'Polygon', coordinates: [[[-46.70,-23.62],[-46.58,-23.62],[-46.58,-23.52],[-46.70,-23.52],[-46.70,-23.62]]] } };
+  const invalidLayer = { type: 'FeatureCollection', features: [{ type: 'Feature', properties: { name: 'sem precipitação' }, geometry: geometry.geometry }] };
+  let response = await fetch(`${baseUrl}/api/isohyet_simulation`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ geometry, scenarios: [{ id: 'invalid', name: 'Inválida', layer: invalidLayer }] }) });
+  let data = await response.json();
+  assert.equal(response.status, 422, JSON.stringify(data));
+  assert.match(data.error, /positive rainfall value/);
+
+  const partialLayer = { type: 'FeatureCollection', features: [{ type: 'Feature', properties: { ID: 1500 }, geometry: { type: 'Polygon', coordinates: [[[-46.70,-23.62],[-46.69,-23.62],[-46.69,-23.61],[-46.70,-23.61],[-46.70,-23.62]]] } }] };
+  response = await fetch(`${baseUrl}/api/isohyet_simulation`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ geometry, scenarios: [{ id: 'partial', name: 'Parcial', layer: partialLayer }] }) });
+  data = await response.json();
+  assert.equal(response.status, 422, JSON.stringify(data));
+  assert.match(data.error, /less than 95%/);
+
+  const scenarios = Array.from({ length: 7 }, (_, index) => ({ id: 'historical-1980', name: `Cenário ${index + 1}` }));
+  response = await fetch(`${baseUrl}/api/isohyet_simulation`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ geometry, scenarios }) });
+  data = await response.json();
+  assert.equal(response.status, 400, JSON.stringify(data));
+  assert.match(data.error, /between 1 and 6/);
+});
+
+test('returns 404 for an unknown catalog isohyet', async () => {
+  const response = await fetch(`${baseUrl}/api/isohyet_catalog/unknown-layer`);
+  assert.equal(response.status, 404);
+  assert.deepEqual(await response.json(), { error: 'Camada de isoietas não encontrada' });
 });
 
 test('lists the historical isohyet layer available for simulations', async () => {

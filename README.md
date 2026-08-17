@@ -21,6 +21,7 @@ A aplicação estará disponível em `http://localhost:3001`.
 ```bash
 npm run check
 npm test
+npm run test:coverage
 ```
 
 ## Configuração opcional
@@ -36,6 +37,8 @@ npm test
 Ao selecionar uma ottobacia, o mapa também destaca o ottotrecho associado e apresenta o nome do curso d'água e a extensão cadastrada. Com `MAPBOX_TOKEN` configurado, a aplicação consulta a elevação do primeiro e do último ponto da linha: o extremo de maior cota é identificado como **Ponto Montante** e o de menor cota como **Ponto Jusante**. Se a consulta não estiver disponível, os extremos continuam visíveis como ponto inicial e final, sem presumir o sentido do escoamento.
 
 Como fluxo adicional, selecione **Desenhar bacia**, marque os vértices com o Leaflet-Geoman e feche o polígono clicando no primeiro vértice. Nesse modo, as variáveis são calculadas diretamente a partir da geometria desenhada; o fluxo por coordenadas continua usando a ottobacia correspondente ao ponto.
+
+Ao concluir o desenho, o sistema cruza a geometria com a base oficial de ottobacias, colore no mapa cada área de interseção e apresenta uma lista ordenada. Para cada ottobacia são informados o código, a área intersectada, sua participação percentual na área desenhada e o percentual da própria ottobacia coberto pelo desenho.
 
 Após qualquer cálculo, use **Simular outras isoietas** para comparar a camada histórica com até cinco camadas GeoJSON carregadas pelo usuário. O arquivo deve conter feições `Polygon` ou `MultiPolygon` e informar a precipitação anual em milímetros em uma destas propriedades: `ID`, `rain`, `precipitation`, `precipitacao`, `P` ou `mm`. As camadas precisam cobrir ao menos 95% da bacia. Cada arquivo pode ter até 25 MB, o conjunto de uploads até 50 MB e cada camada até 750 mil coordenadas. Navegadores compatíveis enviam a simulação compactada com gzip. Os uploads são processados em memória e não são armazenados.
 
