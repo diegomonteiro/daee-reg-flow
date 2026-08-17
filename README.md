@@ -4,7 +4,7 @@ Sistema web de regionalização de vazões para o Estado de São Paulo.
 
 ## Requisitos
 
-- Node.js 20 ou superior
+- Node.js 24.x
 - npm 10 ou superior
 
 ## Desenvolvimento
