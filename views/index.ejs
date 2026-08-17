@@ -1,959 +1,481 @@
-
 <!doctype html>
-<html lang="en" data-bs-theme="auto">
-  <head>
-    <meta charset="utf-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1">
-    <meta name="description" content="">
-    <meta name="author" content="Diego Monteiro">
-    <title>REG-FLOW - Sistema de Regionalização de Vazões do Estado de São Paulo</title>
-
-    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@docsearch/css@3">
-
-    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet" integrity="sha384-T3c6CoIi6uLrA9TneNEoa7RxnatzjcDSCmG1MXxSR1GAsXEV/Dwwykc2MPK8M2HN" crossorigin="anonymous">
-
-    <!-- Leaflet CSS-->
-    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
-    integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY="
-    crossorigin=""/>
-
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/jquery/3.7.1/jquery.min.js" integrity="sha512-v2CJ7UaYy4JwqLDIrZUI/4hqeoQieOmAZNXBeQyjo21dadnwR+8ZaIJVT8EE2iyI61OV8e6M8PP2/4hpQINQ/g==" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
-    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/js/bootstrap.bundle.min.js" integrity="sha384-C6RzsynM9kWDrMNeT87bh95OGNyZPhcTNXj1NW7RuBCsyN/o0jlpcV8Qyq46cDfL" crossorigin="anonymous"></script>
-
-    <!-- Leaflet -->
-    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
-    integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo="
-    crossorigin=""></script>
-
-    <!-- Leaflet Hash -->
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet-hash/0.2.1/leaflet-hash.min.js"></script>
-
-    <!-- Leaflet IconLayers -->
-    <link href="https://cdn.jsdelivr.net/npm/leaflet-iconlayers@0.2.0/dist/iconLayers.css" text="text/css" rel="stylesheet" />
-    <script src="https://cdn.jsdelivr.net/npm/leaflet-iconlayers@0.2.0/dist/iconLayers.js"></script>
-
-    <!-- Leaflet SlideMenu -->
-    <link href="https://unbam.github.io/Leaflet.SlideMenu/L.Control.SlideMenu.css" text="text/css" rel="stylesheet" />
-    <script src="https://unbam.github.io/Leaflet.SlideMenu/L.Control.SlideMenu.js"></script>
-
-    <!-- Leaflet Geoman-->
-    <link rel="stylesheet" href="https://unpkg.com/@geoman-io/leaflet-geoman-free@latest/dist/leaflet-geoman.css" />
-    <script src="https://unpkg.com/@geoman-io/leaflet-geoman-free@latest/dist/leaflet-geoman.min.js"></script>  
-
-    <!-- Leaflet MarkerCluster -->
-    <link href="https://unpkg.com/leaflet.markercluster@1.5.3/dist/MarkerCluster.Default.css" />
-    <script src="https://unpkg.com/leaflet.markercluster@1.5.3/dist/leaflet.markercluster.js"></script>
-
-    <!-- Lodash -->
-    <script src="https://cdn.jsdelivr.net/npm/lodash@4.17.21/lodash.min.js"></script>
-
-     <!-- FontAwesome -->
-     <script src="https://kit.fontawesome.com/170baf7a52.js" crossorigin="anonymous"></script>
-
-     <!-- Moment -->
-     <script src="https://cdnjs.cloudflare.com/ajax/libs/moment.js/2.29.4/moment.min.js"></script>
-     <script src="https://cdnjs.cloudflare.com/ajax/libs/moment.js/2.29.4/moment-with-locales.min.js"></script>
- 
-     <!-- Turf.js -->
-     <script src="https://cdn.jsdelivr.net/npm/@turf/turf@6/turf.min.js"></script>
-
-     <!-- SwitchBaseMap -->
-     <script src="https://elegant-meninsky-515912.netlify.app/main.eb127ecea7b7559c70ac.js"></script>
-
-     
-     <script src="https://code.highcharts.com/highcharts.js"></script>
-     <script src="https://code.highcharts.com/dashboards/dashboards.js"></script>
-
-     <script src="/layers/geojson/rain_isoline.js"></script>
-     <script src="/layers/geojson/rau.js"></script>
-     <script src="/layers/geojson/rxyz.js"></script>
-
-    <style>
-      .bd-placeholder-img {
-        font-size: 1.125rem;
-        text-anchor: middle;
-        -webkit-user-select: none;
-        -moz-user-select: none;
-        user-select: none;
-      }
-
-      @media (min-width: 768px) {
-        .bd-placeholder-img-lg {
-          font-size: 3.5rem;
-        }
-      }
-
-      .b-example-divider {
-        width: 100%;
-        height: 3rem;
-        background-color: rgba(0, 0, 0, .1);
-        border: solid rgba(0, 0, 0, .15);
-        border-width: 1px 0;
-        box-shadow: inset 0 .5em 1.5em rgba(0, 0, 0, .1), inset 0 .125em .5em rgba(0, 0, 0, .15);
-      }
-
-      .b-example-vr {
-        flex-shrink: 0;
-        width: 1.5rem;
-        height: 100vh;
-      }
-
-      .bi {
-        vertical-align: -.125em;
-        fill: currentColor;
-      }
-
-      .nav-scroller {
-        position: relative;
-        z-index: 2;
-        height: 2.75rem;
-        overflow-y: hidden;
-      }
-
-      .nav-scroller .nav {
-        display: flex;
-        flex-wrap: nowrap;
-        padding-bottom: 1rem;
-        margin-top: -1px;
-        overflow-x: auto;
-        text-align: center;
-        white-space: nowrap;
-        -webkit-overflow-scrolling: touch;
-      }
-
-      .btn-bd-primary {
-        --bd-violet-bg: #712cf9;
-        --bd-violet-rgb: 112.520718, 44.062154, 249.437846;
-
-        --bs-btn-font-weight: 600;
-        --bs-btn-color: var(--bs-white);
-        --bs-btn-bg: var(--bd-violet-bg);
-        --bs-btn-border-color: var(--bd-violet-bg);
-        --bs-btn-hover-color: var(--bs-white);
-        --bs-btn-hover-bg: #6528e0;
-        --bs-btn-hover-border-color: #6528e0;
-        --bs-btn-focus-shadow-rgb: var(--bd-violet-rgb);
-        --bs-btn-active-color: var(--bs-btn-hover-color);
-        --bs-btn-active-bg: #5a23c8;
-        --bs-btn-active-border-color: #5a23c8;
-      }
-
-      .bd-mode-toggle {
-        z-index: 1500;
-      }
-
-      .bd-mode-toggle .dropdown-menu .active .bi {
-        display: block !important;
-      }
-
-      #map { 
-        margin-top: 50px;
-        height: calc(100vh - 50px);
-      }
-    </style>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="Sistema de regionalização de vazões do Estado de São Paulo">
+  <meta name="theme-color" content="#063f4c">
+  <title>REG-FLOW — Regionalização de vazões</title>
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 24 24%22><path fill=%22%23086fc1%22 d=%22M12 2C8.8 6.4 5 10.4 5 15a7 7 0 0014 0c0-4.6-3.8-8.6-7-13Z%22/></svg>">
+  <link rel="preconnect" href="https://tile.openstreetmap.org">
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin="anonymous">
+  <link rel="stylesheet" href="https://unpkg.com/@geoman-io/leaflet-geoman-free@2.20.0/dist/leaflet-geoman.css">
+  <link rel="stylesheet" href="/stylesheets/style.css">
 </head>
-<body>    
-<header data-bs-theme="dark">
-  <nav class="navbar navbar-expand-md navbar-dark fixed-top bg-dark">
-    <div class="container-fluid">
-      <a class="navbar-brand" href="#">REG-FLOW</a>
-      <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbarCollapse" aria-controls="navbarCollapse" aria-expanded="false" aria-label="Toggle navigation">
-        <span class="navbar-toggler-icon"></span>
+<body>
+  <header class="app-header">
+    <a class="brand" href="/" aria-label="REG-FLOW — página inicial">
+      <span class="brand-mark" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M12 2C8.8 6.4 5 10.4 5 15a7 7 0 0 0 14 0c0-4.6-3.8-8.6-7-13Z"/><path d="M8.8 15.5c.7 1.7 2 2.5 3.8 2.5"/></svg></span>
+      <span class="brand-name">REG-FLOW</span><span class="brand-divider" aria-hidden="true"></span>
+      <span class="brand-subtitle">Regionalização de vazões</span>
+    </a>
+    <button class="header-action" id="open-search" type="button" aria-controls="search-panel"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="m20 20-4-4"/></svg><span>Nova consulta</span></button>
+  </header>
+
+  <main class="workspace">
+    <div id="map" aria-label="Mapa interativo do Estado de São Paulo"></div>
+    <section class="search-panel" id="search-panel" aria-labelledby="search-title">
+      <div class="panel-heading"><div><h1 id="search-title">Consultar vazão</h1><p>Informe um ponto em São Paulo ou selecione-o no mapa.</p></div>
+        <button class="icon-button search-close" id="close-search" type="button" aria-label="Fechar busca"><svg viewBox="0 0 24 24"><path d="M18 6 6 18M6 6l12 12"/></svg></button>
+      </div>
+      <form id="coordinate-form" novalidate>
+        <div class="coordinate-fields">
+          <label class="field"><span>Latitude</span><input type="number" id="latitude" min="-90" max="90" step="any" inputmode="decimal" placeholder="-23,550000" required></label>
+          <label class="field"><span>Longitude</span><input type="number" id="longitude" min="-180" max="180" step="any" inputmode="decimal" placeholder="-46,633309" required></label>
+        </div>
+        <p class="field-help">Use graus decimais. Exemplo: −23,550000; −46,633309.</p>
+        <div class="form-actions">
+          <button class="button button-secondary" id="locate-button" type="button"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><circle cx="12" cy="12" r="8"/><path d="M12 2V5M12 19v3M2 12h3M19 12h3"/></svg>Minha localização</button>
+          <button class="button button-primary" id="calculate-button" type="submit"><svg class="button-icon" viewBox="0 0 24 24"><path d="M12 3C9 7.2 6 10.6 6 14.5a6 6 0 0 0 12 0C18 10.6 15 7.2 12 3Z"/></svg><span>Calcular vazão</span><span class="spinner" aria-hidden="true"></span></button>
+        </div>
+      </form>
+    </section>
+
+    <div class="draw-toolbar" id="draw-toolbar" aria-label="Ferramentas de desenho">
+      <button class="draw-button" id="start-drawing" type="button" title="Desenhar uma bacia">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m4 17 5-11 10 4-2 9H7Z"/><circle cx="9" cy="6" r="1.5"/><circle cx="19" cy="10" r="1.5"/><circle cx="17" cy="19" r="1.5"/><circle cx="4" cy="17" r="1.5"/></svg>
+        <span>Desenhar bacia</span>
       </button>
-      <div class="collapse navbar-collapse" id="navbarCollapse">
-        <ul class="navbar-nav">
-          <li class="nav-item">
-            <a class="nav-link active" aria-current="page" href="#">Home</a>
-          </li>
-          <li class="nav-item">
-            <a class="nav-link" href="#" id="btn_calc">Calcular</a>
-          </li>
-         
-          <!--<li class="nav-item dropdown">
-            <a class="nav-link dropdown-toggle" href="#" role="button" data-bs-toggle="dropdown" aria-expanded="false">
-              Regionalização
-            </a>
-            <ul class="dropdown-menu">
-              <li><a class="dropdown-item" href="#">Vazão média de longo período</a></li>
-              <li><a class="dropdown-item" href="#">Vazão mínima de duração</a></li>
-              <li><a class="dropdown-item" href="#">Curva de permanência de vazões</a></li>
-              <li><a class="dropdown-item" href="#">Volume de armazenamento intra-anual</a></li>
-              <li><a class="dropdown-item" href="#">Vazão mínima de site dias</a></li>
-            </ul>
-          </li>-->
-        </ul>
-        
-      </div>
+      <button class="draw-button icon-only" id="cancel-drawing" type="button" aria-label="Cancelar desenho" title="Cancelar desenho" hidden>
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M18 6 6 18M6 6l12 12"/></svg>
+      </button>
+      <p id="drawing-instructions" role="status" hidden>Clique para adicionar vértices. <kbd>D</kbd> desfaz o último ponto.</p>
     </div>
-  </nav>
-</header>
 
-<main>
-  <div id="map"></div>
-  
-  <div class="offcanvas offcanvas-end" style="width: 50%" data-bs-scroll="true" data-bs-backdrop="false" tabindex="-1" id="results_tab" aria-labelledby="results_tab">
-    <div class="offcanvas-header">
-      <h5 class="offcanvas-title" id="offcanvasScrollingLabel">Resultado</h5>
-      <button type="button" class="btn-close" data-bs-dismiss="offcanvas" aria-label="Close"></button>
+    <aside class="isohyet-editor" id="isohyet-editor" hidden aria-labelledby="isohyet-editor-title">
+      <div class="editor-heading"><div><p>Editor de cenário</p><h2 id="isohyet-editor-title">Editar isoietas históricas</h2></div><button class="icon-button" id="cancel-isohyet-edit" type="button" aria-label="Cancelar edição"><svg viewBox="0 0 24 24"><path d="M18 6 6 18M6 6l12 12"/></svg></button></div>
+      <p class="editor-help">Selecione uma faixa colorida no mapa para alterar seu valor ou seus vértices.</p>
+      <label class="editor-field">Precipitação da faixa selecionada <span><input id="isohyet-value" type="number" min="1" max="10000" step="1" disabled><b>mm</b></span></label>
+      <div class="editor-actions"><button class="button button-secondary" id="apply-isohyet-value" type="button" disabled>Aplicar valor</button><button class="button button-secondary" id="toggle-isohyet-shape" type="button" disabled>Editar forma</button></div>
+      <div class="regional-adjustment"><h3>Variação por região</h3><p>Defina o percentual e desenhe a área que receberá a alteração.</p><label>Variação <span><input id="isohyet-percentage" type="number" min="-99" max="500" step="1" value="10"><b>%</b></span></label><button class="button button-secondary" id="draw-adjustment-region" type="button">Desenhar região</button></div>
+      <p class="editor-status" id="isohyet-editor-status" role="status" aria-live="polite">Nenhuma faixa selecionada.</p>
+      <button class="button button-primary editor-save" id="save-isohyet-edit" type="button">Salvar como novo cenário</button>
+    </aside>
+
+    <aside class="results-panel" id="results-panel" aria-labelledby="results-title" aria-hidden="true">
+      <div class="results-header"><div><p>Consulta regionalizada</p><h2 id="results-title">Resultados</h2></div><button class="icon-button" id="close-results" type="button" aria-label="Fechar resultados"><svg viewBox="0 0 24 24"><path d="M18 6 6 18M6 6l12 12"/></svg></button></div>
+      <div class="results-empty" id="results-empty"><div class="empty-icon"><svg viewBox="0 0 24 24"><path d="M12 21s7-5.2 7-12a7 7 0 1 0-14 0c0 6.8 7 12 7 12Z"/><circle cx="12" cy="9" r="2.5"/></svg></div><h3>Selecione um ponto</h3><p>Preencha as coordenadas ou clique no mapa para calcular as vazões da bacia correspondente.</p></div>
+      <div class="results-loading" id="results-loading" hidden aria-live="polite"><div class="loading-mark"></div><h3>Analisando a bacia</h3><p>Cruzando limites, precipitação e regiões hidrológicas.</p><div class="skeleton-list"><i></i><i></i><i></i><i></i></div></div>
+      <div class="results-content" id="results-content" hidden>
+        <dl class="parameter-list"><div><dt>Bacia</dt><dd id="result-basin">—</dd></div><div><dt>Área da bacia</dt><dd id="result-area">—</dd></div><div><dt>Curso d’água</dt><dd id="result-watercourse">—</dd></div><div><dt>Extensão do trecho</dt><dd id="result-stream-length">—</dd></div><div><dt>Ponto montante</dt><dd id="result-upstream">—</dd></div><div><dt>Ponto jusante</dt><dd id="result-downstream">—</dd></div><div><dt>Região A/U</dt><dd id="result-rau">—</dd></div><div><dt>Região XYZ</dt><dd id="result-rxyz">—</dd></div></dl>
+        <details class="coefficients"><summary>Ver coeficientes do cálculo</summary><dl class="parameter-list compact"><div><dt>A Média</dt><dd id="result-avg-a">—</dd></div><div><dt>B Média</dt><dd id="result-avg-b">—</dd></div><div><dt>Coeficiente a</dt><dd id="result-coef-a">—</dd></div><div><dt>Coeficiente b</dt><dd id="result-coef-b">—</dd></div><div><dt>Coeficiente c</dt><dd id="result-coef-c">—</dd></div></dl></details>
+        <div class="metric-list">
+          <article class="metric"><div class="metric-icon"><svg viewBox="0 0 24 24"><path d="M7 17a4 4 0 0 1-.5-8A6 6 0 0 1 18 10a3.5 3.5 0 0 1-.5 7H7Z"/><path d="m9 19-1 2M13 19l-1 2M17 19l-1 2"/></svg></div><div><span>Precipitação anual média</span><strong id="result-rain">—</strong></div></article>
+          <article class="metric"><div class="metric-icon"><svg viewBox="0 0 24 24"><path d="M3 8c2 0 2-2 4-2s2 2 4 2 2-2 4-2 2 2 4 2 2-2 2-2M3 13c2 0 2-2 4-2s2 2 4 2 2-2 4-2 2 2 4 2 2-2 2-2M3 18c2 0 2-2 4-2s2 2 4 2 2-2 4-2 2 2 4 2 2-2 2-2"/></svg></div><div><span>Vazão média plurianual</span><strong id="result-average">—</strong></div></article>
+          <article class="metric emphasis"><div class="metric-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M3 10c2 0 2-2 4-2s2 2 4 2 2-2 4-2 2 2 4 2"/><path d="m7 16 3 3 7-7"/></svg></div><div><span>Vazão Q95%</span><strong id="result-q95">—</strong></div></article>
+          <article class="metric emphasis"><div class="metric-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><rect x="4" y="5" width="16" height="15" rx="2"/><path d="M8 3v4M16 3v4M4 10h16M8 14h.01M12 14h.01M16 14h.01"/></svg></div><div><span>Vazão Q<sub>7,10</sub></span><strong id="result-q710">—</strong></div></article>
+        </div>
+        <p class="method-note">Estimativas produzidas pelo método de regionalização. Confirme premissas e limitações antes do uso técnico.</p>
+        <button class="simulation-trigger" id="open-simulation" type="button" disabled><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 19V9M10 19V5M16 19v-8M22 19H2"/><path d="m3 6 5-3 6 4 7-5"/></svg><span>Simular outras isoietas</span></button>
+      </div>
+    </aside>
+    <div class="map-hint" id="map-hint" role="status">Clique no mapa para escolher um ponto</div>
+    <div class="toast" id="toast" role="status" aria-live="polite" hidden><span class="toast-icon"></span><span id="toast-message"></span><button type="button" id="close-toast" aria-label="Fechar aviso">×</button></div>
+  </main>
+
+  <dialog class="simulation-dialog" id="simulation-dialog" aria-labelledby="simulation-title">
+    <div class="simulation-header"><div><p>Comparação de cenários</p><h2 id="simulation-title">Simulação com outras isoietas</h2></div><button class="icon-button" id="close-simulation" type="button" aria-label="Fechar simulação"><svg viewBox="0 0 24 24"><path d="M18 6 6 18M6 6l12 12"/></svg></button></div>
+    <div class="simulation-body">
+      <p class="simulation-intro">Compare a camada histórica com até cinco arquivos GeoJSON. Cada feição deve ser um polígono com a precipitação anual em <code>ID</code>, <code>rain</code>, <code>precipitation</code>, <code>precipitacao</code>, <code>P</code> ou <code>mm</code>.</p>
+      <section class="scenario-picker" aria-labelledby="scenario-title">
+        <div class="section-heading"><div><h3 id="scenario-title">Isoietas da simulação</h3><p>Selecione uma ou mais camadas.</p></div><label class="upload-button" for="isohyet-upload"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 16V4M7 9l5-5 5 5M4 15v5h16v-5"/></svg>Adicionar GeoJSON</label><input id="isohyet-upload" type="file" accept=".geojson,.json,application/geo+json,application/json" multiple hidden></div>
+        <div class="scenario-list" id="scenario-list"></div>
+        <p class="upload-help" id="upload-help">Os arquivos ficam somente nesta sessão e não são armazenados no servidor.</p>
+      </section>
+      <div class="simulation-actions"><p id="simulation-status" role="status" aria-live="polite"></p><button class="button button-primary" id="run-simulation" type="button"><span>Executar simulação</span><span class="spinner" aria-hidden="true"></span></button></div>
+      <section class="comparison-results" id="comparison-results" hidden aria-labelledby="comparison-title">
+        <div class="comparison-heading"><div><p>Resultado comparativo</p><h3 id="comparison-title">Efeito das isoietas nas vazões</h3></div><span id="comparison-count"></span></div>
+        <p class="comparison-summary" id="comparison-summary"></p>
+        <div class="comparison-chart" id="comparison-chart" role="img"></div>
+        <div class="comparison-table-wrap"><table class="comparison-table"><caption>Valores calculados por cenário de isoietas</caption><thead><tr><th scope="col">Cenário</th><th scope="col">Precipitação</th><th scope="col">Vazão média</th><th scope="col">Q95%</th><th scope="col">Q<sub>7,10</sub></th></tr></thead><tbody id="comparison-table-body"></tbody></table></div>
+        <p class="comparison-note">As diferenças decorrem somente da troca da camada de precipitação. A geometria da bacia e os coeficientes regionais permanecem constantes.</p>
+      </section>
     </div>
-    <div class="offcanvas-body">
-      <div class="card text-bg-secondary" style="width: 100%">
-        <div class="card-body">
-          <h5 class="card-title">Parâmetros Regionalização</h5>
-          <!--<h6 class="card-subtitle mb-2 text-body-secondary">Card subtitle</h6>-->
-        </div>
-        <ul class="list-group list-group-flush">
-          <li class="list-group-item">Ponto Inicial (lat/lon): <span id="txt-coords">-</span></li>
-          <li class="list-group-item">Bacia <span id="txt-basin">-</span></li>
-          <li class="list-group-item">Área(km²): <span id="txt-area-drawed">-</span></li>
-          <li class="list-group-item">Região A/U: <span id="txt-region-au">-</span></li>
-          <li class="list-group-item">Região XYZ: <span id="txt-region-xyz">-</span></li>
-          <li class="list-group-item">A Média: <span id="txt-region-au-a-avg">-</span></li>
-          <li class="list-group-item">B Média: <span id="txt-region-au-b-avg">-</span></li>          
-          <li class="list-group-item">Coef. a: <span id="txt-region-au-coef-a">-</span></li>
-          <li class="list-group-item">Coef. b: <span id="txt-region-au-coef-b">-</span></li>          
-          <li class="list-group-item">Coef. c: <span id="txt-region-xyz-coef-c">-</span></li>
-        </ul>
-      </div>
-      <br/>
-      <div class="card text-bg-primary" style="width: 100%">
-        <div class="card-body">
-          <h5 class="card-title">Precipitação anual média (mm)</h5>
-          <!--<h6 class="card-subtitle mb-2 text-body-secondary">Card subtitle</h6>-->
-          <h1 class="card-text" id="txt-avg-rainfall">-</h1>
-        </div>
-      </div>
-      <br/>
-      <div class="card text-bg-info" style="width: 100%">
-        <div class="card-body">
-          <h5 class="card-title">Vazão Média Plurianual (m³/s)</h5>
-          <!--<h6 class="card-subtitle mb-2 text-body-secondary">Card subtitle</h6>-->
-          <h1 class="card-text" id="txt-avg-discharge">-</h1>
-        </div>
-      </div>
-      <br/>
-      <div class="card text-bg-warning" style="width: 100%;">
-        <div class="card-body">
-          <h5>Vazão Q95%</h5>
-          <h1 class="card-text" id="txt-q95">-</h1>
-        </div>
-      </div>
-      <br/>
-      <div class="card text-bg-danger" style="width: 100%;">
-        <div class="card-body">
-          <h5>Vazão Q<sub>7,10</sub></h5>
-          <h1 class="card-text" id="txt-q710">-</h1>
-        </div>
-      </div>
-      
-      <br/>
-      <!--<div class="card text-bg-warning" style="width: 100%">
-        <div class="card-body">
-          
-          <h1 class="card-text" id="txt-q95">-</h1>
-          <h5 class="card-text">Vazões mínimas 7 dias consecutivos</h5>
-        </div>
-        <div style="height: 250px" id="chart_q7t"></div>                                                  
-      </div>
+  </dialog>
 
-      <br/>-->
-      
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin="anonymous"></script>
+  <script src="https://unpkg.com/@geoman-io/leaflet-geoman-free@2.20.0/dist/leaflet-geoman.min.js"></script>
+  <script>
+  (() => {
+    'use strict';
+    const byId = id => document.getElementById(id);
+    const form = byId('coordinate-form'), latInput = byId('latitude'), lonInput = byId('longitude');
+    const calculateButton = byId('calculate-button'), locateButton = byId('locate-button'), searchPanel = byId('search-panel');
+    const resultsPanel = byId('results-panel'), empty = byId('results-empty'), loading = byId('results-loading'), content = byId('results-content');
+    const startDrawingButton = byId('start-drawing'), cancelDrawingButton = byId('cancel-drawing');
+    const drawingInstructions = byId('drawing-instructions');
+    const simulationDialog = byId('simulation-dialog'), simulationButton = byId('open-simulation'), scenarioList = byId('scenario-list');
+    const uploadInput = byId('isohyet-upload'), runSimulationButton = byId('run-simulation'), simulationStatus = byId('simulation-status');
+    const isohyetEditor = byId('isohyet-editor'), isohyetValue = byId('isohyet-value'), percentageInput = byId('isohyet-percentage');
+    const osm = L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 19, attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors' });
+    const topo = L.tileLayer('https://{s}.tile.opentopomap.org/{z}/{x}/{y}.png', { maxZoom: 17, attribution: '&copy; OpenStreetMap contributors, SRTM | &copy; OpenTopoMap (CC-BY-SA)' });
+    const rapideye = L.tileLayer.wms('https://datageo.ambiente.sp.gov.br/geoimage/datageoimg/ows', { layers: 'ESP_IMG_RAPIDEYE_2013_2014', format: 'image/png', attribution: 'DataGEO — RapidEye 2013/2014' });
+    const emplasa = L.tileLayer.wms('https://datageo.ambiente.sp.gov.br/geoimage/datageoimg/ORTOFOTOS_EMPLASA_2010/ows', { layers: 'ORTOFOTOS_EMPLASA_2010', format: 'image/png', attribution: 'DataGEO — Emplasa 2010/2011' });
+    const map = L.map('map', { zoomControl: false, layers: [osm] }).setView([-22.55, -48.65], 7);
+    map.pm.setLang('pt_br');
+    map.pm.setGlobalOptions({ continueDrawing: false, snappable: true, allowSelfIntersection: false });
+    L.control.zoom({ position: 'bottomleft' }).addTo(map); L.control.scale({ metric: true, imperial: false }).addTo(map);
+    const layerControl = L.control.layers({ OpenStreetMap: osm, OpenTopoMap: topo, RapidEye: rapideye, Emplasa: emplasa }, {}, { position: 'bottomright' }).addTo(map);
+    const basinLayer = L.geoJSON(null, { style: { color: '#087bbd', weight: 3, fillColor: '#2a9bd4', fillOpacity: .18 } }).addTo(map);
+    const rainLayer = L.geoJSON(null, { style: f => ({ color: '#527986', weight: 1, dashArray: '4 4', fillColor: rainColor(f.properties.rain), fillOpacity: .18 }) }).addTo(map);
+    const streamLayer = L.geoJSON(null, { style: { color: '#0759c7', weight: 5, opacity: .9 } }).addTo(map);
+    const streamEndpointLayer = L.layerGroup().addTo(map);
+    let marker = null, controller = null, isDrawing = false, lastCalculation = null, isIsohyetEditing = false, drawingAdjustmentRegion = false;
+    let catalogIsohyets = [], uploadedIsohyets = [], simulationMapLayers = [];
+    let editingIsohyetGroup = null, selectedIsohyetLayer = null, editingIsohyetSource = null;
+    const scenarioColors = ['#086fc1', '#d97706', '#7c3aed', '#059669', '#dc2626', '#526871'];
 
-    </div>
-  </div>
-
-  <div class="modal fade" id="modal-filtro" data-bs-backdrop="static" data-bs-keyboard="false" tabindex="-1" aria-labelledby="staticBackdropLabel" aria-hidden="true">
-    <div class="modal-dialog modal-dialog-centered modal-dialog-scrollable">
-      <div class="modal-content">
-        <div class="modal-header">
-          <h5 class="modal-title" id="staticBackdropLabel">Ponto de partida!</h5>
-          <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
-        </div>
-        <div class="modal-body">
-          
-        </div>
-        <div class="modal-footer">
-          <button type="button" class="btn btn-primary" id="btn_filter">Continuar</button>
-        </div>
-      </div>
-    </div>
-  </div>
-
-  <div class="modal fade" id="modal-calculate-q710" data-bs-backdrop="static" data-bs-keyboard="false" tabindex="-1" aria-labelledby="staticBackdropLabel" aria-hidden="true">
-    <div class="modal-dialog modal-dialog-centered modal-dialog-scrollable">
-      <div class="modal-content">
-        <div class="modal-header">
-          <h5 class="modal-title" id="staticBackdropLabel">Calcular Vazão Regionalizada!</h5>
-          <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
-        </div>
-        <div class="modal-body">
-          <form id="form-coords-join" method="GET" action="#">
-            
-            <div class="row">
-              <div class="col">
-                <label for="q7_10_regions" class="form-label">Latitude</label>                
-                <input class="form-control" type="text" id="latitude" name="latitude" />
-              </div>
-              <div class="col">
-                <label for="q7_10_regions" class="form-label">Longitude</label>                
-                <input class="form-control" type="text" id="longitude" name="longitude" />
-              </div>
-              <div class="col">
-                <label for="btn-location" class="form-label"></label>            
-                <button type="button" id="btn-location" class="btn btn-primary form-control">
-                                <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="currentColor" class="bi bi-pin-map-fill" viewBox="0 0 16 16">
-                  <path fill-rule="evenodd" d="M3.1 11.2a.5.5 0 0 1 .4-.2H6a.5.5 0 0 1 0 1H3.75L1.5 15h13l-2.25-3H10a.5.5 0 0 1 0-1h2.5a.5.5 0 0 1 .4.2l3 4a.5.5 0 0 1-.4.8H.5a.5.5 0 0 1-.4-.8z"></path>
-                  <path fill-rule="evenodd" d="M4 4a4 4 0 1 1 4.5 3.969V13.5a.5.5 0 0 1-1 0V7.97A4 4 0 0 1 4 3.999z"></path>
-                </svg>
-                  Meu local
-                </button>
-              </div>
-            </div>
-            
-          </form>
-        </div>
-        <div class="modal-footer">
-          <button type="button" onclick="calculate_coords_join();" class="btn btn-primary" id="btn_filter">Calcular</button>
-        </div>
-      </div>
-    </div>
-  </div>
-
-</main>
-
-
-
-<script>
-  var map = L.map('map').setView([-22.255, -48.14], 7);
-
-  var hash = new L.Hash(map);
-
-  var overlayMaps = {};
-
-  var scalebar = L.control.scale({ metric: true, imperial: false, maxWidth: 200 }).addTo(map);
-  
-  var isolineGroup = L.layerGroup();
-  var basinGroup   = L.layerGroup();
-
-  const bsOffcanvas = new bootstrap.Offcanvas('#results_tab')
-
-  //mapbox://styles/diegomonteiro/ckzsznqn1001b14k5jqpw442k
-  //mapbox://styles/diegomonteiro/ckzszx8bu001514qupk8mtfdr
-  //mapbox://styles/diegomonteiro/clkwkcjsi00db01pb7ws27c3o
-  var baseMaps = new L.basemapsSwitcher([
-    {
-      layer: L.tileLayer('https://api.mapbox.com/styles/v1/diegomonteiro/ckzt04tmb000x15pnabkxg5fc/tiles/256/{z}/{x}/{y}@2x?access_token=pk.eyJ1IjoiZGllZ29tb250ZWlybyIsImEiOiJjaWtpeTNucGYwNTdudTBtNjMzeW80Y2FsIn0.D1Y1o7NvJA6hwrKAs_NcIg', {
-        maxZoom: 22,
-        attribution: '&copy; <a href="http://www.mapbox.com">Mapbox</a>'
-      }).addTo(map),
-      icon: 'images/mapbox-daee.png',
-      name: 'Mapbox'
-    },
-    {
-      layer: L.tileLayer('https://api.mapbox.com/styles/v1/diegomonteiro/ckzsznqn1001b14k5jqpw442k/tiles/256/{z}/{x}/{y}@2x?access_token=pk.eyJ1IjoiZGllZ29tb250ZWlybyIsImEiOiJjaWtpeTNucGYwNTdudTBtNjMzeW80Y2FsIn0.D1Y1o7NvJA6hwrKAs_NcIg', {
-        maxZoom: 22,
-        attribution: '&copy; <a href="http://www.mapbox.com">Mapbox</a>'
-      }),
-      icon: 'images/mapbox-outdoors.png',
-      name: 'Outdoors'
-    },
-    {
-      layer: L.tileLayer('https://api.mapbox.com/styles/v1/diegomonteiro/ckzszx8bu001514qupk8mtfdr/tiles/256/{z}/{x}/{y}@2x?access_token=pk.eyJ1IjoiZGllZ29tb250ZWlybyIsImEiOiJjaWtpeTNucGYwNTdudTBtNjMzeW80Y2FsIn0.D1Y1o7NvJA6hwrKAs_NcIg', {
-        maxZoom: 22,
-        attribution: '&copy; <a href="http://www.mapbox.com">Mapbox</a>'
-      }),
-      icon: 'images/mapbox-satelite.png',
-      name: 'Satélite'
-    },
-    {
-      layer: L.tileLayer.wms('https://datageo.ambiente.sp.gov.br/geoimage/datageoimg/ows?SERVICE=WMS',{
-        layers: 'ESP_IMG_RAPIDEYE_2013_2014',
-        format: 'image/png',
-        transparent: true,
-        attribution: 'RapidEYE 2013/2014'
-      }),
-      icon: 'images/mapbox-satelite.png',
-      name: 'Rapideye'
-    },
-    {
-      layer: L.tileLayer.wms('https://datageo.ambiente.sp.gov.br/geoimage/datageoimg/ORTOFOTOS_EMPLASA_2010/ows?SERVICE=WMS',{
-        layers: 'ORTOFOTOS_EMPLASA_2010',
-        format: 'image/png',
-        transparent: true,
-        attribution: 'Emplasa 2010/2011'
-      }),
-      icon: 'images/mapbox-satelite.png',
-      name: 'Emplasa'
+    function rainColor(v) { return v > 2250 ? '#6954c6' : v > 1750 ? '#1589c9' : v > 1450 ? '#18a277' : v > 1250 ? '#9dbb32' : '#e5a432'; }
+    function number(v, d = 2) { v = Number(v); return Number.isFinite(v) ? v.toLocaleString('pt-BR', { minimumFractionDigits: d, maximumFractionDigits: d }) : '—'; }
+    function text(id, value) { byId(id).textContent = value; }
+    function toast(message, type = 'success') { text('toast-message', message); byId('toast').className = `toast ${type}`; byId('toast').hidden = false; clearTimeout(toast.timer); toast.timer = setTimeout(() => byId('toast').hidden = true, 5000); }
+    function openResults() { resultsPanel.classList.add('open'); resultsPanel.setAttribute('aria-hidden', 'false'); document.body.classList.add('results-open'); setTimeout(() => map.invalidateSize(), 260); }
+    function closeResults() { resultsPanel.classList.remove('open'); resultsPanel.setAttribute('aria-hidden', 'true'); document.body.classList.remove('results-open'); setTimeout(() => map.invalidateSize(), 260); }
+    function setLoading(value) { calculateButton.disabled = value; locateButton.disabled = value; calculateButton.classList.toggle('loading', value); empty.hidden = true; content.hidden = true; loading.hidden = !value; if (value) openResults(); }
+    function selectPoint(lat, lon, center = false) { latInput.value = Number(lat).toFixed(6); lonInput.value = Number(lon).toFixed(6); marker ? marker.setLatLng([lat, lon]) : marker = L.marker([lat, lon], { alt: 'Ponto selecionado' }).addTo(map); if (center) map.setView([lat, lon], Math.max(map.getZoom(), 11)); text('map-hint', 'Ponto selecionado — clique em Calcular vazão'); byId('map-hint').classList.add('selected'); }
+    function polygonArea(feature) { const ringArea = ring => Math.abs(ring.reduce((sum, p, i) => { const q = ring[(i + 1) % ring.length]; return sum + (q[0] - p[0]) * Math.PI / 180 * (2 + Math.sin(p[1] * Math.PI / 180) + Math.sin(q[1] * Math.PI / 180)); }, 0) * 6378137 * 6378137 / 2); const g = feature.geometry, polygons = g.type === 'Polygon' ? [g.coordinates] : g.coordinates; return polygons.reduce((sum, p) => sum + ringArea(p[0]) - p.slice(1).reduce((s, r) => s + ringArea(r), 0), 0) / 1e6; }
+    function streamPointMarker(point, type, fallbackLabel) {
+      if (!point?.coordinates) return;
+      const label = type === 'upstream' ? 'Ponto Montante' : type === 'downstream' ? 'Ponto Jusante' : fallbackLabel;
+      const elevation = Number.isFinite(point.elevation_m) ? `${number(point.elevation_m, 0)} m` : 'cota indisponível';
+      L.marker([point.coordinates[1], point.coordinates[0]], { icon: L.divIcon({ className: `stream-endpoint ${type || 'unknown'}`, html: `<span></span><b>${label}</b>`, iconSize: [128, 32], iconAnchor: [12, 16] }), alt: `${label}, ${elevation}` }).bindTooltip(`${label} · ${elevation}`, { permanent: false, direction: 'top' }).addTo(streamEndpointLayer);
     }
-    ,
-  ], { position: 'bottomright' }).addTo(map);
-
-  var controlLayer = L.control.layers({}, overlayMaps).addTo(map);
-  
-  controlLayer.addOverlay(isolineGroup, "Isolinhas");
-  controlLayer.addOverlay(basinGroup, "Ottobacias");
-  
-  var heights = [];
-
-
-  var aux_markers = L.markerClusterGroup({
-    animate:false,
-    removeOutsideVisibleBounds:true,
-    spiderfyOnMaxZoom: true,
-    showCoverageOnHover: true,
-    zoomToBoundsOnClick: true,
-    maxClusterRadius: 30
-  });
-
-  //map.addLayer(aux_markers);
-  
-  //Add Draw Controls
-  map.pm.addControls({  
-    position: 'topleft',  
-    drawCircle: false,
-    drawCircleMarker: false,
-    drawRectangle: false,
-    drawPolyline: false
-  });
-
-  const modal_filtro = new bootstrap.Modal('#modal-filtro');
-  const modal_calc_q710 = new bootstrap.Modal("#modal-calculate-q710");
-
-  if(window.location.hash==''){
-    //modal_filtro.show();
-    modal_calc_q710.show();
-  }
-  else if(window.location.hash.split("/").length == 3){
-    var coords = window.location.hash.split("/")
-    var latitude  = parseFloat(coords[1]);
-    var longitude = parseFloat(coords[2]);
-    var zoom      = coords[0].replace("#","");
-
-    console.log("lat: ", latitude)
-    console.log("lon: ", longitude)
-    console.log("zoom: ", zoom);
-
-    $("#latitude").val(latitude);
-    $("#longitude").val(longitude);
-  }
-
-  $("#btn_calc").on('click', function(e){
-    modal_calc_q710.show();
-  })
-
-  map.on('moveend', function(e){
-    console.log("Map moveend: ", e);
-
-    var coords = window.location.hash.split("/")
-    var latitude  = parseFloat(coords[1]);
-    var longitude = parseFloat(coords[2]);
-    var zoom      = coords[0].replace("#","");
-
-    console.log("lat: ", latitude)
-    console.log("lon: ", longitude)
-    console.log("zoom: ", zoom);
-
-    $("#latitude").val(latitude);
-    $("#longitude").val(longitude);
-  })
-
-  //Monitoring Layers Add/Delete
-  map.on('layeradd', function(e){
-    //console.log("Layer Added: ", e);
-  });
-
-  map.on('pm:drawstart', function(e){
-    console.log("Start Draw");
-  })
-  
-  map.on('pm:create', (e) => {
-    L.PM.reInitLayer(e.layer);
-
-    var drawed_layers = L.PM.Utils.findLayers(map);
-    //Checking layers includes
-    var shape_types = _.uniq(_.map(drawed_layers, function(o){ return o.pm._shape; }));
-
-    console.log("Shapes drawed: ", shape_types);
-
-    //if(_.includes(shape_types, "Marker") && _.includes(shape_types, "Polygon")){
-    if(_.includes(shape_types, "Polygon")){
-      //var points = _.filter(drawed_layers, function(o){ return o.pm._shape == "Marker" });
-      var basins = _.filter(drawed_layers, function(o){ return o.pm._shape == "Polygon" });    
-
-      //Get first or last coordinates points to set a start point of basin
-      var points = [L.marker(_.first(basins)._latlngs[0][0])]
-
-      console.log("Points basin: ", points);
-
-      var turf_points = [];
-
-      console.log("Points Drawed: ", points)
-      console.log("Basins Drawed: ", basins)
-
-      var latitude;
-      var longitude;
-
-      //Fill with points to make a Grid
-      $.each(points, function(k,point){
-        console.log("Render Point Drawed => ", point);
-
-        latitude = point._latlng.lat;
-        longitude = point._latlng.lng;
-
-        $("#txt-coords").html(latitude+", "+longitude);
-        //latitude = e.layer._latlng.lat;
-        //longitude = e.layer._latlng.lng;
-        turf_points.push(turf.point([longitude, latitude]));
-
-      })
-
-      $.each(basins, function(k,basin){
-
-        //Add event click
-        basin.on('click', function(e){
-          //alert("Click on basin");
-          //Configure to reopen offcanvas with results
-          console.log("Click on basin");
-          bsOffcanvas.show()
-        })
-
-        var points_grid = turf.featureCollection(turf_points);
-        console.log("Points Grid: ", points_grid);
-
-        //var pts = turf.pointsWithinPolygon(points_grid, basin.toGeoJSON());
-        var pts = points_grid;
-        console.log("Points Pts: ", pts);
-
-        var basin_area = turf.area(basin.toGeoJSON())/1000000;
-        var basin_border = turf.polygonToLine(basin.toGeoJSON());
-        var perimeter = turf.length(basin_border, {units: 'kilometers'});
-
-        turf.featureEach(pts, function (currentPoint, featureIndex) {
-          var avg_rainfall = getAvgAnnualRainByRegion(basin);
-          var region_coefs = getAvgCoefsByRegion(basin_border);
-
-          console.log("Avg.Rainfall: ", avg_rainfall)
-          console.log("Coefs By Region: ", region_coefs);
-
-          $("#txt-coords").html(latitude+", "+longitude);
-
-          $("#txt-area-drawed").html(basin_area.toFixed(2))
-          //$("#txt-avg-discharge").html(qms.avg.toFixed(2))
-          $("#txt-avg-rainfall").html(avg_rainfall.toFixed(2));
-
-          $("#txt-region-au-a-avg").html(region_coefs.rau.a);
-          $("#txt-region-au-b-avg").html(region_coefs.rau.b);
-
-          $("#txt-region-au-coef-a").html(region_coefs.rau.coef_a);
-          $("#txt-region-au-coef-b").html(region_coefs.rau.coef_b);
-          $("#txt-region-xyz-coef-c").html(region_coefs.rxyz.coef_c);
-
-          txt_regions_au  = _.map(region_coefs.rau.bands, function(o){ return o.properties.region+" ("+o.properties.partial_area.toFixed(2)+"km²)"})
-          txt_regions_xyz = _.map(region_coefs.rxyz.bands, function(o){ return o.properties.id+" ("+o.properties.partial_area.toFixed(2)+"km²)"}) 
-
-          $("#txt-region-au").html(txt_regions_au.join(", "));
-          $("#txt-region-xyz").html(txt_regions_xyz.join(", "));
-
-          $.get(`/api/calculate_discharge_avg/${region_coefs.rau.a}/${region_coefs.rau.b}/${avg_rainfall}/${basin_area}`, function(qms){
-            console.log("Qms: ", qms);
-            $("#txt-avg-discharge").html(qms.avg.toFixed(2))
-
-            var requests_q95s = [];
-            var requests_q7s  = [];
-            //Get by Areas
-            _.each(region_coefs.rau.bands, function(region_rau, region_rau_key){
-              //console.log(region_rau_key," => ",region_rau);
-              requests_q95s.push($.get(`/api/calculate_q95/${region_rau.properties.region}/${qms.avg}/${region_rau.properties.partial_area}`));
-              requests_q7s.push($.get(`/api/calculate_q7/${region_rau.properties.region}/${region_coefs.rxyz.coef_c}/${region_coefs.rau.coef_a}/${region_coefs.rau.coef_b}/${qms.avg}/${region_rau.properties.partial_area}`))
-            });
-
-            let avg_q95s_weight = [];
-
-            let avg_q710_weight = [];
-            
-            //console.log("Q95s => ",q95s);
-            Promise.all(requests_q95s).then((values) => {
-              //console.log("Q95s => ", values);
-              _.each(values, function(val_q95, val_key){
-                avg_q95s_weight.push({value: val_q95.q95, weight: val_q95.area_km2});
-              })
-
-              console.log("Q95s => ", avg_q95s_weight);
-              var q95_final = calcAvgWeight(avg_q95s_weight);
-              $("#txt-q95").html(q95_final.toFixed(2));
-            });
-
-            Promise.all(requests_q7s).then((values) => {
-              _.each(values, function(val_q7, val_key){
-                //console.log("Q7 => ", val_q7);
-                avg_q710_weight.push({value: val_q7.discharges[0].discharge, weight: val_q7.discharges[0].area_km2});
-              })
-
-              console.log("Q7s => ", avg_q710_weight);
-              var q710_final = calcAvgWeight(avg_q710_weight);
-              $("#txt-q710").html(q710_final.toFixed(2));
-            });
-            bsOffcanvas.show();
-          })
-        })
-      })
+    function renderStreams(segments) {
+      streamLayer.clearLayers(); streamEndpointLayer.clearLayers();
+      if (!segments?.length) { text('result-watercourse', 'Não disponível para geometria desenhada'); text('result-stream-length', '—'); text('result-upstream', '—'); text('result-downstream', '—'); return; }
+      streamLayer.addData({ type: 'FeatureCollection', features: segments });
+      const names = [...new Set(segments.map(item => item.properties?.NOCOMPLETO).filter(Boolean))];
+      const length = segments.reduce((sum, item) => sum + Number(item.properties?.NUCOMPTREC || 0), 0);
+      text('result-watercourse', names.join(', ') || 'Curso sem nome'); text('result-stream-length', length ? `${number(length)} km` : '—');
+      const primary = segments[0].properties?.stream_endpoints;
+      if (primary?.upstream && primary?.downstream) {
+        streamPointMarker(primary.upstream, 'upstream'); streamPointMarker(primary.downstream, 'downstream');
+        text('result-upstream', `${number(primary.upstream.elevation_m, 0)} m`); text('result-downstream', `${number(primary.downstream.elevation_m, 0)} m`);
+      } else {
+        streamPointMarker(primary?.first, null, 'Ponto inicial'); streamPointMarker(primary?.last, null, 'Ponto final');
+        text('result-upstream', 'Elevação indisponível'); text('result-downstream', 'Elevação indisponível');
+      }
+      streamLayer.bindTooltip(names[0] || 'Ottotrecho', { sticky: true });
     }
-  })
-
-  /**
-   * Method to calculate Coeficients by Area
-   * */
-  function getAvgCoefsByRegion(basin_border_geo){
-    var coefbands_bounds = turf.bbox(basin_border_geo);
-    var extent = coefbands_bounds;
-    var cellSide = 1;
-
-    var options = {units: 'kilometers'};
-
-    var avg_coefs_areas_rau;
-    var avg_coefs_areas_rxyz;
-
-    var avg_coefs_points_rau;
-    var avg_coefs_points_rxyz;
-
-    var point_grids = turf.pointGrid(extent, cellSide, options);
-
-    //Areas
-    var coef_avg_weighted_areas_rau = [];
-    var coef_avg_weighted_areas_rxyz = [];
-
-    //Rau AVG Weighted
-    rau_avg_a_weighted_areas = [];
-    rau_avg_b_weighted_areas = [];
-    rau_avg_xt10_weigted_areas = [];
-    rau_avg_coef_a_weighted_areas = [];
-    rau_avg_coef_b_weighted_areas = [];
-    rau_avg_qp95_weighted_areas = [];
-    rain_avg_weighted_areas = [];
-    rain_avg_weighted_points = [];
-
-    //Rxyz AVG Weighted
-    var rxyz_avg_weighted_areas = [];
-
-    //Bands
-    var rau_bands = [];
-    var rxyz_bands = [];
-
-    //Each by Coef A..U
-    turf.featureEach(rau_geo, function(rau_feature, rau_index){
-      //Getting points inside polygon
-      var pts = turf.pointsWithinPolygon(point_grids, rau_feature);
-
-      if(pts.features.length > 0){        
-        //Each by basins features
-        turf.featureEach(basin_border_geo, function(basinFeature, basinIndex){
-          var rau_band = turf.intersect(turf.lineToPolygon(basinFeature), rau_feature);
-          if(rau_band){
-            var partial_area = turf.area(rau_band.geometry)/1000000;
-            var avg_rau_obj = {
-              id: rau_feature.properties.ID,
-              region: rau_feature.properties.REGIAO,
-              avg_a: rau_feature.properties.A_MEDIA,
-              avg_b: rau_feature.properties.B_MEDIA,
-              xt_10: rau_feature.properties.XT10,
-              coef_a: rau_feature.properties.A,
-              coef_b: rau_feature.properties.B,
-              qp95: rau_feature.properties.QP95,
-              partial_area: partial_area
-            };
-            
-            rau_band.properties = _.merge(avg_rau_obj, basinFeature.properties);
-              
-            //Weight areas coefs
-            rau_avg_a_weighted_areas.push({value: avg_rau_obj.avg_a, weight: partial_area});
-            rau_avg_b_weighted_areas.push({value: avg_rau_obj.avg_b, weight: partial_area});
-            rau_avg_xt10_weigted_areas.push({value: avg_rau_obj.xt_10, weight: partial_area});
-            rau_avg_coef_a_weighted_areas.push({value: avg_rau_obj.coef_a, weight: partial_area});
-            rau_avg_coef_b_weighted_areas.push({value: avg_rau_obj.coef_b, weight: partial_area});
-            rau_avg_qp95_weighted_areas.push({value: avg_rau_obj.qp95, weight: partial_area});
-
-            rau_bands.push(rau_band);                      
-          }
-        });
+    function render(data) {
+      lastCalculation = data;
+      simulationButton.disabled = false;
+      clearSimulationLayers();
+      byId('comparison-results').hidden = true;
+      const segment = data.ottotrecho?.[0]?.properties || {}, basin = data.ottobacia.properties || {};
+      text('result-basin', data.source === 'drawn-geometry' ? 'Bacia desenhada' : segment.NOCOMPLETO || segment.COBACIA || basin.COBACIA || 'Bacia sem nome'); text('result-area', `${number(data.area_km2 ?? polygonArea(data.ottobacia))} km²`);
+      text('result-rau', [...new Set((data.rau.bands || []).map(i => i.properties.region).filter(Boolean))].join(', ').toUpperCase() || '—'); text('result-rxyz', [...new Set((data.rxyz.bands || []).map(i => i.properties.id).filter(Boolean))].join(', ') || '—');
+      [['avg-a',data.rau.avg_a],['avg-b',data.rau.avg_b],['coef-a',data.rau.coef_a],['coef-b',data.rau.coef_b],['coef-c',data.rxyz.coef_c]].forEach(([id,v]) => text(`result-${id}`, number(v,4)));
+      text('result-rain', `${number(data.isolines.avg_areas,1)} mm`); text('result-average', `${number(data.avg_discharge)} m³/s`); text('result-q95', `${number(data.q95)} m³/s`); text('result-q710', `${number(data.q710)} m³/s`);
+      basinLayer.clearLayers().addData(data.ottobacia); rainLayer.clearLayers(); (data.isolines.bands || []).forEach(b => rainLayer.addData(b)); renderStreams(data.ottotrecho); map.fitBounds(basinLayer.getBounds(), { padding: [42,42], maxZoom: 12 });
+      loading.hidden = true; content.hidden = false; empty.hidden = true; openResults();
+    }
+    async function calculate(lat, lon) {
+      controller?.abort(); controller = new AbortController(); setLoading(true);
+      try { const response = await fetch(`/api/coords_join/${encodeURIComponent(lat)}/${encodeURIComponent(lon)}`, { signal: controller.signal }); const data = await response.json().catch(() => ({})); if (!response.ok) throw new Error(data.error === 'Point outside SP' ? 'O ponto informado está fora do Estado de São Paulo.' : data.error || 'Não foi possível calcular para este ponto.'); render(data); toast('Cálculo realizado com sucesso.'); history.replaceState(null, '', `#${map.getZoom()}/${Number(lat).toFixed(6)}/${Number(lon).toFixed(6)}`); }
+      catch (error) { if (error.name === 'AbortError') return; loading.hidden = true; empty.hidden = false; empty.querySelector('h3').textContent = 'Não foi possível calcular'; empty.querySelector('p').textContent = error.message; toast(error.message, 'error'); }
+      finally { calculateButton.disabled = false; locateButton.disabled = false; calculateButton.classList.remove('loading'); }
+    }
+    function setDrawingMode(value) {
+      isDrawing = value;
+      document.body.classList.toggle('drawing-mode', value);
+      startDrawingButton.hidden = value;
+      cancelDrawingButton.hidden = !value;
+      drawingInstructions.hidden = !value;
+      if (value) {
+        byId('toast').hidden = true;
+        if (marker) { map.removeLayer(marker); marker = null; }
+        basinLayer.clearLayers();
+        rainLayer.clearLayers();
+        streamLayer.clearLayers(); streamEndpointLayer.clearLayers();
+        drawingInstructions.innerHTML = 'Adicione os vértices e clique no primeiro para finalizar. <kbd>D</kbd> desfaz o último ponto.';
+        closeResults();
+        setSearchOpen(false);
+        map.pm.addControls({ position: 'topright' });
+        map.pm.enableDraw('Polygon', { snappable: true, allowSelfIntersection: false, templineStyle: { color: '#086fc1' }, hintlineStyle: { color: '#5a8da5', dashArray: [6, 6] }, pathOptions: { color: '#086fc1', weight: 3, fillColor: '#2a9bd4', fillOpacity: .2 } });
+      } else {
+        map.pm.disableDraw('Polygon');
+        if (map.pm.globalEditModeEnabled()) map.pm.disableGlobalEditMode();
+        if (map.pm.globalDragModeEnabled()) map.pm.disableGlobalDragMode();
+        if (map.pm.globalRemovalModeEnabled()) map.pm.disableGlobalRemovalMode();
+        if (map.pm.globalCutModeEnabled()) map.pm.disableGlobalCutMode();
+        if (map.pm.globalRotateModeEnabled()) map.pm.disableGlobalRotateMode();
+        map.pm.removeControls();
       }
-    });
-
-    //Each by Coef XYZ
-    turf.featureEach(rxyz_geo, function(rxyz_feature, rxyz_index){
-      //Getting points inside polygon
-      var pts = turf.pointsWithinPolygon(point_grids, rxyz_feature);
-
-      if(pts.features.length > 0){
-        //Each by basins features
-        turf.featureEach(basin_border_geo, function(basinFeature, basinIndex){
-          var rxyz_band = turf.intersect(turf.lineToPolygon(basinFeature), rxyz_feature);
-          
-          if(rxyz_band){
-              var partial_area = turf.area(rxyz_band.geometry)/1000000;
-              var avg_rxyz_obj = {id: rxyz_feature.properties.ID, coef_c: rxyz_feature.properties.C, partial_area: partial_area};
-              rxyz_band.properties = _.merge(avg_rxyz_obj, basinFeature.properties);
-              
-              rxyz_avg_weighted_areas.push({value: avg_rxyz_obj.coef_c, weight: partial_area});
-              rxyz_bands.push(rxyz_band);                      
-          }
-        })
-      }
-    });
-
-    return {
-      rau: {
-        bands:  rau_bands,
-        a:      calcAvgWeight(rau_avg_a_weighted_areas),
-        b:      calcAvgWeight(rau_avg_b_weighted_areas),
-        coef_a: calcAvgWeight(rau_avg_coef_a_weighted_areas),
-        coef_b: calcAvgWeight(rau_avg_coef_b_weighted_areas),
-        xt10:   calcAvgWeight(rau_avg_xt10_weigted_areas),
-        qp95:   calcAvgWeight(rau_avg_qp95_weighted_areas)
-      },
-      rxyz: {
-        bands: rxyz_bands,
-        coef_c: calcAvgWeight(rxyz_avg_weighted_areas)
-      }
-    };
-  }
-
-  /**
-   * Method to Get Mean of Annual Precipitation values of Isolines calculated,
-   * Executing grid points of 1 kilometer, filtering point of basin border
-   * Populating options values with Isoband calculated value
-   * 
-   */
-  function getAvgAnnualRainByRegion(basin_border_geo){
-    var isobands_bounds = basin_border_geo.getBounds();
-
-    var extent = [isobands_bounds._southWest.lng, isobands_bounds._southWest.lat, isobands_bounds._northEast.lng, isobands_bounds._northEast.lat,];
-    var cellSide = 1;
-    var options = {units: 'kilometers'};
-    var avg_rain_areas;
-    var avg_rain_points;
-
-    var point_grids = turf.pointGrid(extent, cellSide, options);
-
-    var rain_avg_weighted_areas = [];
-    var rain_avg_weighted_points = [];
-
-    turf.featureEach(rain_isoline, function(rainFeature, rainIndex){
-      var pts = turf.pointsWithinPolygon(point_grids, rainFeature);
-
-      if(pts.features.length > 0){
-      
-        turf.featureEach(basin_border_geo.toGeoJSON(), function(basinFeature, basinIndex){
-        
-          //console.log("Isoband: ", rainFeature);
-          //console.log("BasinShape: ", basinFeature);
-
-          //Check basin is Polygon to convert to LineString
-          if(turf.getType(basinFeature) == "Polygon"){
-            //console.log("Convert Geometry: ", basinFeature);
-            basinFeature = turf.polygonToLine(basinFeature);
-          }
-
-          var isoband = turf.intersect(turf.lineToPolygon(basinFeature), rainFeature);
-          //console.log("Isoband AVG: ", isoband);
-          if(isoband){
-            var partial_area = turf.area(isoband.geometry)/1000000;
-            avg_rain_obj = {rain: rainFeature.properties.ID, partial_area: partial_area};
-
-            isoband.properties = $.extend({}, avg_rain_obj, basinFeature.properties);
-
-            var isoband_geo = L.geoJSON(isoband, {
-              onEachFeature: function(feature, layer){
-                layer.on({
-                  /*mouseover: highlightFeature,
-                  mouseout: resetHighlight,*/
-                  click: function(e){                    
-                    console.log("Partial Rain: ", e.target.feature.properties);
-                  }
-                });
-              },
-              style: styleRainIsoline
-            });
-
-            rain_avg_weighted_areas.push({value: avg_rain_obj.rain, weight: partial_area});
-            isolineGroup.addLayer(isoband_geo);
-          }          
-        });http://ankartech.com/?4-wire-basic-video-door-phone/27.html
-        
-        var pts_tags = turf.tag(pts, rainFeature,'ID','rain');
-        var avg_rain = _.meanBy(pts_tags.features, function(o){ return o.properties.rain });
-        rain_avg_weighted_points.push({value: avg_rain, weight: pts_tags.features.length});
-      }
-    });
-
-    avg_rain_areas = calcAvgWeight(rain_avg_weighted_areas);
-    avg_rain_points = calcAvgWeight(rain_avg_weighted_points);
-
-    console.log("Rain Area: ",avg_rain_areas," - Points: ",avg_rain_points);
-    return avg_rain_areas;
-  }
-
-  /**
-   * Calculate Average using weights, using object value with weight and value parameters
-   * */
-  function calcAvgWeight(values){
-    var total_weight = _.sumBy(values, function(o){ return o.weight });
-    var aux_vals = [];
-
-    $.each(values, function(k,v){
-      aux_vals.push(v.value * v.weight);
-    });
-
-    return _.sum(aux_vals)/total_weight;
-  }
-
-  /**
-   * Function to Calculate Coordinates Joins
-   * */
-  function calculate_coords_join(latitude=null, longitude=null){
-    var latitude  = (latitude == null) ? $("#latitude").val() : latitude;
-    var longitude = (longitude == null) ? $("#longitude").val() : longitude;
-
-    console.log("Latitude: ", latitude," <> Longitude: ", longitude);
-
-    $.get("/api/coords_join/"+latitude+"/"+longitude, function(response){
-      
-      //Clear all layer groups
-      basinGroup.clearLayers();
-      isolineGroup.clearLayers();
-      
-      //map.setView([latitude, longitude], 12)
-      basin = L.geoJSON(response.ottobacia, {
-        onEachFeature: function(feature, layer){
-          layer.on({
-            click: function(e){
-              console.log("Click basin => ", e);
-              bsOffcanvas.show();
-            }
-          })
+    }
+    function isEditableTarget(target) { return target instanceof HTMLElement && (target.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(target.tagName)); }
+    function undoLastDrawnVertex() {
+      const polygonDraw = map.pm.Draw.Polygon;
+      if (!isDrawing || !polygonDraw?.enabled?.() || typeof polygonDraw._removeLastVertex !== 'function') return false;
+      const points = polygonDraw._layer?.getLatLngs?.() || [];
+      if (!points.length) { toast('Ainda não há pontos para desfazer.', 'error'); return true; }
+      polygonDraw._removeLastVertex();
+      const remaining = polygonDraw._layer?.getLatLngs?.().length || 0;
+      drawingInstructions.innerHTML = `${remaining} ${remaining === 1 ? 'vértice mantido' : 'vértices mantidos'}. <kbd>D</kbd> desfaz o último ponto.`;
+      return true;
+    }
+    async function calculateDrawnGeometry(geometry, sourceLayer) {
+      setDrawingMode(false);
+      controller?.abort(); controller = new AbortController(); setLoading(true);
+      try {
+        const response = await fetch('/api/geometry_calculate', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ geometry }), signal: controller.signal });
+        const data = await response.json().catch(() => ({}));
+        if (!response.ok) {
+          const messages = { 'The geometry must be entirely within the State of São Paulo': 'A geometria deve estar inteiramente dentro do Estado de São Paulo.', 'The geometry cannot contain self-intersections': 'A geometria possui cruzamentos. Redesenhe a bacia sem cruzar as linhas.' };
+          throw new Error(messages[data.error] || data.error || 'Não foi possível calcular a geometria desenhada.');
         }
-      });
-
-      basinGroup.addLayer(basin);
-
-      response.isolines.bands.forEach(band => {
-        isolineGroup.addLayer(L.geoJSON(band,{
-            onEachFeature: function(feature, layer){
-              layer.on({
-                //mouseover: highlightFeature,
-                //mouseout: resetHighlight,
-                click: function(e){
-                  
-                  console.log("Partial Rain: ", e.target.feature.properties);
-                }
-              });
-            },
-            style: styleRainIsoline
-          }))
-      });
-
-      var basin_area = turf.area(basin.toGeoJSON())/1000000;
-      
-      $("#txt-coords").html(latitude+", "+longitude);
-
-
-      console.log("Ottotrecho:", _.first(response.ottotrecho).properties.COBACIA);
-      var basin_obj = _.first(response.ottotrecho);
-      var basin_name = "";
-      
-      if(basin_obj.properties.NOCOMPLETO == null){
-        basin_name = basin_obj.properties.COBACIA+" - Sem nome";  
+        map.removeLayer(sourceLayer);
+        render(data);
+        toast('Cálculo da bacia desenhada realizado com sucesso.');
+      } catch (error) {
+        if (error.name === 'AbortError') return;
+        loading.hidden = true; empty.hidden = false;
+        empty.querySelector('h3').textContent = 'Não foi possível calcular'; empty.querySelector('p').textContent = error.message;
+        toast(error.message, 'error');
+      } finally {
+        calculateButton.disabled = false; locateButton.disabled = false; calculateButton.classList.remove('loading');
       }
-      else{
-        basin_name = basin_obj.properties.COBACIA+" - "+basin_obj.properties.NOCOMPLETO;
+    }
+    function isohyetStyle(feature, selected = false) { return { color: selected ? '#e11d48' : rainColor(Number(feature.properties.ID)), weight: selected ? 4 : 2, fillColor: rainColor(Number(feature.properties.ID)), fillOpacity: selected ? .38 : .22 }; }
+    function selectIsohyetLayer(layer) {
+      if (selectedIsohyetLayer && selectedIsohyetLayer !== layer) { selectedIsohyetLayer.pm.disable(); selectedIsohyetLayer.setStyle(isohyetStyle(selectedIsohyetLayer.feature)); }
+      selectedIsohyetLayer = layer; layer.setStyle(isohyetStyle(layer.feature, true));
+      isohyetValue.value = Number(layer.feature.properties.ID); isohyetValue.disabled = false;
+      byId('apply-isohyet-value').disabled = false; byId('toggle-isohyet-shape').disabled = false;
+      text('isohyet-editor-status', `Faixa de ${number(layer.feature.properties.ID, 0)} mm selecionada.`);
+    }
+    function renderIsohyetEditorLayer(data) {
+      if (editingIsohyetGroup) map.removeLayer(editingIsohyetGroup);
+      selectedIsohyetLayer = null; isohyetValue.disabled = true; byId('apply-isohyet-value').disabled = true; byId('toggle-isohyet-shape').disabled = true;
+      editingIsohyetGroup = L.geoJSON(data, { style: feature => isohyetStyle(feature), onEachFeature: (_, layer) => layer.on('click', event => { L.DomEvent.stopPropagation(event); selectIsohyetLayer(layer); }) }).addTo(map);
+      if (lastCalculation?.ottobacia) map.fitBounds(L.geoJSON(lastCalculation.ottobacia).getBounds(), { padding: [70, 70], maxZoom: 10 });
+    }
+    async function openIsohyetEditor(scenario) {
+      try {
+        const response = await fetch('/api/isohyet_editor_layer', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ layerId: scenario.id, geometry: lastCalculation.ottobacia }) }); const data = await response.json();
+        if (!response.ok) throw new Error(data.error || 'Não foi possível carregar a camada.');
+        editingIsohyetSource = scenario; isIsohyetEditing = true; document.body.classList.add('isohyet-editing'); simulationDialog.close(); closeResults(); clearSimulationLayers();
+        isohyetEditor.hidden = false; renderIsohyetEditorLayer(data); text('isohyet-editor-status', 'Selecione uma faixa no mapa.');
+      } catch (error) { toast(error.message, 'error'); }
+    }
+    function closeIsohyetEditor(reopen = false) {
+      drawingAdjustmentRegion = false; isIsohyetEditing = false; document.body.classList.remove('isohyet-editing'); map.pm.disableDraw('Polygon'); map.pm.removeControls();
+      if (selectedIsohyetLayer) selectedIsohyetLayer.pm.disable();
+      if (editingIsohyetGroup) map.removeLayer(editingIsohyetGroup);
+      editingIsohyetGroup = null; selectedIsohyetLayer = null; isohyetEditor.hidden = true;
+      if (reopen) { renderScenarioList(); simulationDialog.showModal(); }
+    }
+    function applySelectedIsohyetValue() {
+      const value = Number(isohyetValue.value); if (!selectedIsohyetLayer || !Number.isFinite(value) || value <= 0 || value > 10000) return toast('Informe uma precipitação entre 1 e 10.000 mm.', 'error');
+      selectedIsohyetLayer.feature.properties.ID = value; selectedIsohyetLayer.setStyle(isohyetStyle(selectedIsohyetLayer.feature, true)); text('isohyet-editor-status', `Valor atualizado para ${number(value, 0)} mm.`);
+    }
+    async function applyRegionalVariation(region, regionLayer) {
+      drawingAdjustmentRegion = false; map.pm.disableDraw('Polygon'); map.pm.removeControls();
+      const percentage = Number(percentageInput.value); text('isohyet-editor-status', 'Aplicando variação na região…');
+      try {
+        const payload = JSON.stringify({ layer: editingIsohyetGroup.toGeoJSON(), region, percentage }); const headers = { 'Content-Type': 'application/json' }; let body = payload;
+        if ('CompressionStream' in window) { body = await new Response(new Blob([payload]).stream().pipeThrough(new CompressionStream('gzip'))).blob(); headers['Content-Encoding'] = 'gzip'; }
+        const response = await fetch('/api/isohyet_adjust', { method: 'POST', headers, body }); const data = await response.json().catch(() => ({}));
+        if (!response.ok) throw new Error(data.error || 'Não foi possível aplicar a variação regional.');
+        map.removeLayer(regionLayer); renderIsohyetEditorLayer(data); text('isohyet-editor-status', `Variação de ${percentage > 0 ? '+' : ''}${number(percentage, 0)}% aplicada à região desenhada.`);
+      } catch (error) { if (map.hasLayer(regionLayer)) map.removeLayer(regionLayer); text('isohyet-editor-status', error.message); toast(error.message, 'error'); }
+    }
+    function saveIsohyetEdit() {
+      if (!editingIsohyetGroup) return;
+      const layer = editingIsohyetGroup.toGeoJSON(); const name = `${editingIsohyetSource.name} — editada ${uploadedIsohyets.filter(item => item.edited).length + 1}`;
+      uploadedIsohyets.push({ id: `edited-${Date.now()}`, name, description: 'Cenário editado visualmente no mapa', source: 'upload', layer, size: new Blob([JSON.stringify(layer)]).size, edited: true });
+      closeIsohyetEditor(true); toast('Cenário editado adicionado à simulação.');
+    }
+    function clearSimulationLayers() {
+      simulationMapLayers.forEach(item => { map.removeLayer(item.layer); layerControl.removeLayer(item.layer); });
+      simulationMapLayers = [];
+    }
+    function scenarioRow(scenario) {
+      const label = document.createElement('label');
+      label.className = 'scenario-option';
+      const checkbox = document.createElement('input');
+      checkbox.type = 'checkbox'; checkbox.checked = true; checkbox.dataset.scenarioId = scenario.id;
+      const mark = document.createElement('span'); mark.className = 'scenario-check'; mark.setAttribute('aria-hidden', 'true');
+      const copy = document.createElement('span'); copy.className = 'scenario-copy';
+      const name = document.createElement('strong'); name.textContent = scenario.name;
+      const description = document.createElement('small'); description.textContent = scenario.description;
+      copy.append(name, description); label.append(checkbox, mark, copy);
+      if (scenario.source === 'upload') {
+        const remove = document.createElement('button'); remove.type = 'button'; remove.className = 'scenario-remove'; remove.textContent = 'Remover'; remove.setAttribute('aria-label', `Remover ${scenario.name}`);
+        remove.onclick = event => { event.preventDefault(); uploadedIsohyets = uploadedIsohyets.filter(item => item.id !== scenario.id); renderScenarioList(); };
+        label.append(remove);
+      } else {
+        const edit = document.createElement('button'); edit.type = 'button'; edit.className = 'scenario-edit'; edit.textContent = 'Editar'; edit.setAttribute('aria-label', `Editar ${scenario.name}`);
+        edit.onclick = event => { event.preventDefault(); openIsohyetEditor(scenario); };
+        label.append(edit);
       }
-
-      $("#txt-basin").html(basin_name);
-
-      $("#txt-area-drawed").html(basin_area.toFixed(2))
-      $("#txt-avg-rainfall").html(response.isolines.avg_areas.toFixed(2));
-
-      $("#txt-region-au-a-avg").html(response.rau.avg_a);
-      $("#txt-region-au-b-avg").html(response.rau.avg_b);
-
-      $("#txt-region-au-coef-a").html(response.rau.coef_a);
-      $("#txt-region-au-coef-b").html(response.rau.coef_b);
-      $("#txt-region-xyz-coef-c").html(response.rxyz.coef_c);
-
-      txt_regions_au  = _.map(response.rau.bands, function(o){ return o.properties.region+" ("+o.properties.partial_area.toFixed(2)+"km²)"})
-      txt_regions_xyz = _.map(response.rxyz.bands, function(o){ return o.properties.id+" ("+o.properties.partial_area.toFixed(2)+"km²)"}) 
-
-      $("#txt-region-au").html(txt_regions_au.join(", "));
-      $("#txt-region-xyz").html(txt_regions_xyz.join(", "));
-
-      bsOffcanvas.show();
-
-      $("#txt-avg-discharge").html(response.avg_discharge.toFixed(2));
-      $("#txt-q95").html(response.q95.toFixed(2));
-      $("#txt-q710").html(response.q710.toFixed(2));
-
-      map.fitBounds(basin.getBounds());
-      modal_calc_q710.hide();
-
-
-    })
-  }
-
-  /**
-   *Method to Get Rainfall Color to Fill Isolines
-   * */
-  function getRainColor(feature){
-    var d = (feature.properties.ID || feature.properties.rain);
-
-    return  d > 3250  ? '#4424FD' :
-            d > 2750  ? '#9D67FE' :
-            d > 2250  ? '#E0A9FE' :
-            d > 1750  ? '#4CCFFD' :
-            d > 1450  ? '#6CE4A9' :
-            d > 1350  ? '#44FE02' :
-            d > 1250  ? '#F3FD47' :
-            d > 1150  ? '#F9E845' :
-                        '#FAAD45';
-  }
-
-  /**
-   * Set Style function to Isoline
-   * */
-  function styleRainIsoline(feature){
-    return {
-          fillColor: getRainColor(feature),
-          weight: 1.3,
-          opacity: 1,
-          color: 'gray',
-          dashArray: '3',
-          fillOpacity: 0.3
-      };
-  }
-
-  /**
-   * Get Elevation Raster Values from Mapbox - Altitude
-   * */
-  async function getElevationRaster(point){
-    var token = "pk.eyJ1IjoiZGllZ29tb250ZWlybyIsImEiOiJjaXFjYjBqbnAwMjZjZndtMXVndWpiOXFwIn0.rTkBcWvjVGH2qdr2ATVwOg";
-    var zoom = 12;
-    var lat = point.geometry.coordinates[1];
-    var lng = point.geometry.coordinates[0];
-    var y = lat2tile(lat,zoom);
-    var x = lon2tile(lng,zoom);
-
-    url = "https://api.mapbox.com/v4/mapbox.terrain-rgb/"+zoom+"/"+x+"/"+y+".png32?access_token="+token;
-    
-    const image = await loadImage(url);
-    var imageData =  getImageData(image);
-
-    const tileIndex = getTileIndex(lat,lng,zoom);
-    const tileData  = imageData;
-
-    var elevation = decodeElevationAux(lat,lng,tileIndex,imageData);
-
-    console.log("Result Raster: ", elevation);
-    return [lat,lng,elevation];
-  }
-
-</script>
+      return label;
+    }
+    function renderScenarioList() {
+      scenarioList.replaceChildren();
+      const catalog = catalogIsohyets.length ? catalogIsohyets : [{ id: 'historical-1980', name: 'Isoietas históricas (pré-1980)', description: 'Referência padrão da regionalização' }];
+      catalog.forEach(item => scenarioList.append(scenarioRow({ ...item, source: 'catalog' })));
+      uploadedIsohyets.forEach(item => scenarioList.append(scenarioRow(item)));
+    }
+    async function addIsohyetFiles(files) {
+      const available = Math.max(0, 5 - uploadedIsohyets.length);
+      if (!available) return toast('O limite é de cinco camadas carregadas.', 'error');
+      let totalSize = uploadedIsohyets.reduce((sum, item) => sum + (item.size || 0), 0);
+      for (const file of [...files].slice(0, available)) {
+        try {
+          if (file.size > 25 * 1024 * 1024) throw new Error('O arquivo excede o limite de 25 MB.');
+          if (totalSize + file.size > 50 * 1024 * 1024) throw new Error('O conjunto de uploads excede o limite de 50 MB.');
+          const layer = JSON.parse(await file.text());
+          if (!['Feature', 'FeatureCollection'].includes(layer?.type)) throw new Error('O arquivo não contém um GeoJSON válido.');
+          const name = file.name.replace(/\.(geojson|json)$/i, '').slice(0, 80) || 'Isoietas carregadas';
+          uploadedIsohyets.push({ id: `upload-${Date.now()}-${uploadedIsohyets.length}`, name, description: `${Array.isArray(layer.features) ? layer.features.length : 1} feição(ões) · ${(file.size / 1024 / 1024).toLocaleString('pt-BR', { maximumFractionDigits: 1 })} MB`, source: 'upload', layer, size: file.size });
+          totalSize += file.size;
+        } catch (error) { toast(`${file.name}: ${error.message}`, 'error'); }
+      }
+      uploadInput.value = '';
+      renderScenarioList();
+    }
+    function nearlyEqual(value, baseline) {
+      if (!Number.isFinite(value) || !Number.isFinite(baseline)) return false;
+      return Math.abs(value - baseline) <= Math.max(1e-9, Math.max(Math.abs(value), Math.abs(baseline)) * 1e-9);
+    }
+    function formatDelta(value, baseline) {
+      if (!Number.isFinite(value) || !Number.isFinite(baseline) || baseline === 0) return '—';
+      if (nearlyEqual(value, baseline)) return 'sem variação';
+      const delta = (value / baseline - 1) * 100;
+      return `${delta > 0 ? '+' : ''}${number(delta, 1)}%`;
+    }
+    function renderComparison(scenarios) {
+      const metrics = [
+        { key: 'rainfall', label: 'Precipitação média', unit: 'mm', digits: 1 },
+        { key: 'avg_discharge', label: 'Vazão média', unit: 'm³/s', digits: 2 },
+        { key: 'q95', label: 'Vazão Q95%', unit: 'm³/s', digits: 2 },
+        { key: 'q710', label: 'Vazão Q7,10', unit: 'm³/s', digits: 2 }
+      ];
+      const baseline = scenarios[0];
+      const chart = byId('comparison-chart'); chart.replaceChildren();
+      metrics.forEach(metric => {
+        const group = document.createElement('section'); group.className = 'chart-group';
+        const title = document.createElement('h4'); title.textContent = metric.label; group.append(title);
+        const max = Math.max(...scenarios.map(item => item[metric.key]), 0);
+        scenarios.forEach((scenario, index) => {
+          const row = document.createElement('div'); row.className = 'chart-row';
+          const label = document.createElement('span'); label.className = 'chart-label'; label.textContent = scenario.name;
+          const track = document.createElement('span'); track.className = 'chart-track';
+          const bar = document.createElement('i'); bar.style.width = `${max > 0 ? Math.max(2, scenario[metric.key] / max * 100) : 0}%`; bar.style.backgroundColor = scenarioColors[index]; track.append(bar);
+          const value = document.createElement('strong'); value.textContent = `${number(scenario[metric.key], metric.digits)} ${metric.unit}`;
+          const delta = document.createElement('small'); delta.textContent = index ? formatDelta(scenario[metric.key], baseline[metric.key]) : 'referência';
+          row.append(label, track, value, delta); group.append(row);
+        });
+        chart.append(group);
+      });
+      const q95Ranking = [...scenarios].sort((a, b) => b.q95 - a.q95);
+      const highest = q95Ranking[0];
+      const resultKeys = ['rainfall', 'avg_discharge', 'q95', 'q710'];
+      const allEquivalent = scenarios.slice(1).every(scenario => resultKeys.every(key => nearlyEqual(scenario[key], baseline[key])));
+      const q95Equivalent = scenarios.slice(1).every(scenario => nearlyEqual(scenario.q95, baseline.q95));
+      let summary;
+      if (scenarios.length === 1) summary = 'Um cenário foi calculado. Adicione outra camada para comparar diferenças.';
+      else if (allEquivalent) summary = 'Os cenários produziram resultados equivalentes. Não houve variação na precipitação, vazão média, Q95% ou Q7,10.';
+      else if (q95Equivalent) summary = `Os cenários apresentaram a mesma Q95% (${number(baseline.q95)} m³/s), embora existam diferenças em outros indicadores.`;
+      else summary = `${highest.name} apresentou a maior Q95% (${number(highest.q95)} m³/s; ${formatDelta(highest.q95, baseline.q95)} frente ao primeiro cenário).`;
+      text('comparison-summary', summary); text('comparison-count', `${scenarios.length} ${scenarios.length === 1 ? 'cenário' : 'cenários'}`);
+      chart.setAttribute('aria-label', `${summary} O gráfico compara precipitação, vazão média, Q95% e Q7,10. Os valores completos estão na tabela seguinte.`);
+      const body = byId('comparison-table-body'); body.replaceChildren();
+      scenarios.forEach((scenario, index) => {
+        const row = document.createElement('tr');
+        const header = document.createElement('th'); header.scope = 'row';
+        const swatch = document.createElement('i'); swatch.className = 'scenario-swatch'; swatch.style.backgroundColor = scenarioColors[index];
+        const name = document.createElement('span'); name.textContent = scenario.name; header.append(swatch, name); row.append(header);
+        [['rainfall',1,' mm'],['avg_discharge',2,' m³/s'],['q95',2,' m³/s'],['q710',2,' m³/s']].forEach(([key,digits,unit]) => { const cell = document.createElement('td'); cell.textContent = `${number(scenario[key], digits)}${unit}`; row.append(cell); });
+        body.append(row);
+      });
+      clearSimulationLayers();
+      scenarios.forEach((scenario, index) => {
+        const layer = L.geoJSON(scenario.bands, { style: { color: scenarioColors[index], weight: 2.2, opacity: .9, fillOpacity: .05, dashArray: index ? '7 5' : null } }).addTo(map);
+        layerControl.addOverlay(layer, `Isoietas — ${scenario.name}`);
+        simulationMapLayers.push({ layer, name: scenario.name });
+      });
+      byId('comparison-results').hidden = false;
+    }
+    async function runIsohyetSimulation() {
+      const checked = [...scenarioList.querySelectorAll('input:checked')].map(input => input.dataset.scenarioId);
+      if (!checked.length) return toast('Selecione ao menos uma camada de isoietas.', 'error');
+      const scenarios = checked.map(id => {
+        const catalogItem = catalogIsohyets.find(item => item.id === id);
+        if (catalogItem) return { id, name: catalogItem.name };
+        if (id === 'historical-1980') return { id, name: 'Isoietas históricas (pré-1980)' };
+        const item = uploadedIsohyets.find(layer => layer.id === id);
+        return { id: item.id, name: item.name, layer: item.layer };
+      });
+      runSimulationButton.disabled = true; runSimulationButton.classList.add('loading'); simulationStatus.textContent = 'Cruzando as isoietas com a bacia…';
+      try {
+        const json = JSON.stringify({ geometry: lastCalculation.ottobacia, scenarios });
+        let body = json;
+        const headers = { 'Content-Type': 'application/json' };
+        if ('CompressionStream' in window) {
+          const stream = new Blob([json]).stream().pipeThrough(new CompressionStream('gzip'));
+          body = await new Response(stream).blob();
+          headers['Content-Encoding'] = 'gzip';
+        }
+        const response = await fetch('/api/isohyet_simulation', { method: 'POST', headers, body });
+        const data = await response.json().catch(() => ({}));
+        if (!response.ok) throw new Error(data.error || (response.status === 413 ? 'O servidor ou proxy recusou o tamanho da requisição.' : 'Não foi possível executar a simulação.'));
+        renderComparison(data.scenarios); simulationStatus.textContent = 'Simulação concluída.'; byId('comparison-results').scrollIntoView({ behavior: 'smooth', block: 'start' });
+      } catch (error) { simulationStatus.textContent = ''; toast(error.message, 'error'); }
+      finally { runSimulationButton.disabled = false; runSimulationButton.classList.remove('loading'); }
+    }
+    async function openSimulation() {
+      if (!lastCalculation) return toast('Calcule uma bacia antes de iniciar a simulação.', 'error');
+      if (!catalogIsohyets.length) {
+        try { const response = await fetch('/api/isohyet_catalog'); if (response.ok) catalogIsohyets = await response.json(); }
+        catch (_) { /* A camada histórica de fallback continua disponível. */ }
+      }
+      renderScenarioList(); simulationDialog.showModal();
+    }
+    function setSearchOpen(value) { searchPanel.classList.toggle('open', value); document.body.classList.toggle('search-open', value); }
+    form.addEventListener('submit', e => { e.preventDefault(); const lat = Number(String(latInput.value).replace(',','.')), lon = Number(String(lonInput.value).replace(',','.')); if (!Number.isFinite(lat) || lat < -90 || lat > 90 || !Number.isFinite(lon) || lon < -180 || lon > 180) { toast('Informe latitude e longitude válidas em graus decimais.', 'error'); (!Number.isFinite(lat) ? latInput : lonInput).focus(); return; } selectPoint(lat, lon); if (innerWidth < 720) setSearchOpen(false); calculate(lat, lon); });
+    map.on('click', e => { if (isDrawing || isIsohyetEditing) return; selectPoint(e.latlng.lat, e.latlng.lng); if (innerWidth < 720) setSearchOpen(true); });
+    map.on('pm:create', event => {
+      if (event.shape !== 'Polygon') return;
+      if (drawingAdjustmentRegion) { applyRegionalVariation(event.layer.toGeoJSON(), event.layer); return; }
+      calculateDrawnGeometry(event.layer.toGeoJSON(), event.layer);
+    });
+    locateButton.addEventListener('click', () => { if (!navigator.geolocation) return toast('Geolocalização indisponível neste navegador.', 'error'); locateButton.disabled = true; navigator.geolocation.getCurrentPosition(p => { locateButton.disabled = false; selectPoint(p.coords.latitude, p.coords.longitude, true); toast('Localização preenchida. Confira o ponto e calcule a vazão.'); }, e => { locateButton.disabled = false; toast(e.code === 1 ? 'Permita o acesso à localização para usar este recurso.' : 'Não foi possível obter sua localização.', 'error'); }, { enableHighAccuracy: true, timeout: 10000, maximumAge: 60000 }); });
+    byId('open-search').onclick = () => setSearchOpen(true); byId('close-search').onclick = () => setSearchOpen(false); byId('close-results').onclick = closeResults; byId('close-toast').onclick = () => byId('toast').hidden = true;
+    simulationButton.onclick = openSimulation; byId('close-simulation').onclick = () => simulationDialog.close(); uploadInput.onchange = () => addIsohyetFiles(uploadInput.files); runSimulationButton.onclick = runIsohyetSimulation;
+    simulationDialog.addEventListener('click', event => { if (event.target === simulationDialog) simulationDialog.close(); });
+    byId('apply-isohyet-value').onclick = applySelectedIsohyetValue;
+    byId('toggle-isohyet-shape').onclick = () => {
+      if (!selectedIsohyetLayer) return;
+      if (selectedIsohyetLayer.pm.enabled()) { selectedIsohyetLayer.pm.disable(); byId('toggle-isohyet-shape').textContent = 'Editar forma'; text('isohyet-editor-status', 'Edição de vértices concluída.'); }
+      else { selectedIsohyetLayer.pm.enable({ allowSelfIntersection: false, snappable: true }); byId('toggle-isohyet-shape').textContent = 'Concluir forma'; text('isohyet-editor-status', 'Arraste os vértices da faixa no mapa.'); }
+    };
+    byId('draw-adjustment-region').onclick = () => {
+      const percentage = Number(percentageInput.value); if (!Number.isFinite(percentage) || percentage <= -100 || percentage > 500) return toast('Informe uma variação entre -99% e 500%.', 'error');
+      if (selectedIsohyetLayer) selectedIsohyetLayer.pm.disable(); drawingAdjustmentRegion = true; text('isohyet-editor-status', 'Desenhe e finalize a região que receberá a variação.');
+      map.pm.addControls({ position: 'topright', drawMarker:false, drawCircleMarker:false, drawPolyline:false, drawRectangle:false, drawCircle:false, drawText:false, editMode:false, dragMode:false, cutPolygon:false, removalMode:false, rotateMode:false });
+      map.pm.enableDraw('Polygon', { snappable: true, allowSelfIntersection: false, pathOptions: { color: '#d97706', weight: 3, fillOpacity: .12 } });
+    };
+    byId('cancel-isohyet-edit').onclick = () => closeIsohyetEditor(true); byId('save-isohyet-edit').onclick = saveIsohyetEdit;
+    startDrawingButton.onclick = () => setDrawingMode(true); cancelDrawingButton.onclick = () => { setDrawingMode(false); toast('Desenho cancelado.'); };
+    document.addEventListener('keydown', event => {
+      if (!isDrawing || isEditableTarget(event.target)) return;
+      if (!event.repeat && (event.key.toLowerCase() === 'd' || event.key === 'Backspace')) { if (undoLastDrawnVertex()) event.preventDefault(); }
+      if (event.key === 'Escape') { event.preventDefault(); setDrawingMode(false); toast('Desenho cancelado.'); }
+    });
+    const hash = location.hash.slice(1).split('/'); if (hash.length === 3 && hash.every(v => Number.isFinite(Number(v)))) { const lat = Number(hash[1]), lon = Number(hash[2]); map.setView([lat,lon], Number(hash[0])); selectPoint(lat,lon); }
+  })();
+  </script>
 </body>
 </html>

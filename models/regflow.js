@@ -1,9 +1,5 @@
-var express = require('express');
-var router  = express.Router();
-var axios   = require('axios');
 var turf    = require('@turf/turf');
 var _       = require('lodash');
-var extend = require('util')._extend;
 
 var municipios_json  = require('../public/layers/municipios.json');
 var ottobacias_json  = require('../public/layers/ottobacias.json');
@@ -28,26 +24,26 @@ const regflow = {
      * @param {*} weighted_by Weighted type (area less eficient, points most eficient)
      * @returns 
      */
-    getRegionsCoeficientsByGeometry(basin_border_geo, cellGridSize=1, optionsGrid={units: 'kilometers'}, weighted_by='area'){
+    getRegionsCoeficientsByGeometry(basin_border_geo, cellGridSize=1, optionsGrid={units: 'kilometers'}, weighted_by='area', rainfallLayer=isolines_json){
         const bounds = turf.bbox(basin_border_geo.geometry);
         const extent = bounds;
         const point_grids = turf.pointGrid(extent, cellGridSize, optionsGrid);
 
         //Rau AVG Weighted
-        rau_avg_a_weighted_areas = [];
-        rau_avg_b_weighted_areas = [];
-        rau_avg_xt10_weigted_areas = [];
-        rau_avg_coef_a_weighted_areas = [];
-        rau_avg_coef_b_weighted_areas = [];
-        rau_avg_qp95_weighted_areas = [];
-        rain_avg_weighted_areas = [];
-        rain_avg_weighted_points = [];
+        const rau_avg_a_weighted_areas = [];
+        const rau_avg_b_weighted_areas = [];
+        const rau_avg_xt10_weigted_areas = [];
+        const rau_avg_coef_a_weighted_areas = [];
+        const rau_avg_coef_b_weighted_areas = [];
+        const rau_avg_qp95_weighted_areas = [];
+        const rain_avg_weighted_areas = [];
+        const rain_avg_weighted_points = [];
 
-        isobands = [];
-        rau_bands = [];
-        rxyz_bands = [];
+        const isobands = [];
+        const rau_bands = [];
+        const rxyz_bands = [];
 
-        rxyz_avg_weighted_areas = [];
+        const rxyz_avg_weighted_areas = [];
 
         //First Get Rau Object
         turf.featureEach(rau_json, function(rauFeature, rauIndex){
@@ -59,13 +55,6 @@ const regflow = {
                 //console.log("Points in Polygon: ", pts.length);
 
                 turf.featureEach(basin_border_geo, function(basinFeature, basinIndex){
-                    const basinType = turf.getType(basinFeature)
-                    //console.log("Basin["+basinType+"]: ", basinFeature);
-
-                    if(basinType == "Polygon"){
-                        //console.log("Try convert Polygon to Line...")
-                        basinFeature = turf.polygonToLine(basinFeature);
-                    }
                     //Get a intersection of BasinPolygon to IsobandPolygon
                     var rau_band = turf.intersect(basinFeature, rauFeature);
 
@@ -104,13 +93,6 @@ const regflow = {
 
             if(pts.features.length > 0){
                 turf.featureEach(basin_border_geo, function(basinFeature, basinIndex){
-                    const basinType = turf.getType(basinFeature)
-                    //console.log("Basin["+basinType+"]: ", basinFeature);
-
-                    if(basinType == "Polygon"){
-                        //console.log("Try convert Polygon to Line...")
-                        basinFeature = turf.polygonToLine(basinFeature);
-                    }
                     //Get a intersection of BasinPolygon to IsobandPolygon
                     var rxyz_band = turf.intersect(basinFeature, rxyzFeature);
 
@@ -126,7 +108,7 @@ const regflow = {
             }
         });
 
-        turf.featureEach(isolines_json, function(rainFeature, rainIndex){
+        turf.featureEach(rainfallLayer, function(rainFeature, rainIndex){
             //Check point inside Rainfall Band
             var pts = turf.pointsWithinPolygon(point_grids, rainFeature);
 
@@ -134,14 +116,6 @@ const regflow = {
             if(pts.features.length > 0){
                 //Each Basin Features to Check
                 turf.featureEach(basin_border_geo, function(basinFeature, basinIndex){
-                    const basinType = turf.getType(basinFeature)
-                    //console.log("Basin["+basinType+"]: ", basinFeature);
-
-                    if(basinType == "Polygon"){
-                        //console.log("Try convert Polygon to Line...")
-                        basinFeature = turf.polygonToLine(basinFeature);
-                    }
-
                     //Get a intersection of BasinPolygon to IsobandPolygon
                     var isoband = turf.intersect(basinFeature, rainFeature);
                     //console.log("Isoband: ", isoband);
@@ -166,8 +140,8 @@ const regflow = {
             }
         });
 
-        avg_rain_areas  = this.calculateAvgByWeight(rain_avg_weighted_areas);
-        avg_rain_points = this.calculateAvgByWeight(rain_avg_weighted_points);
+        const avg_rain_areas  = this.calculateAvgByWeight(rain_avg_weighted_areas);
+        const avg_rain_points = this.calculateAvgByWeight(rain_avg_weighted_points);
 
         return {
             rau: {
@@ -199,7 +173,7 @@ const regflow = {
      * @param {*} weighted_by Weighted options: {area,points}
      * @returns 
      */
-    getMeanRainfallByGeometry(basin_border_geo, cellGridSize=1, optionsGrid={units: 'kilometers'}, weighted_by='area'){
+    getMeanRainfallByGeometry(basin_border_geo, cellGridSize=1, optionsGrid={units: 'kilometers'}, weighted_by='area', rainfallLayer=isolines_json){
         const bounds = turf.bbox(basin_border_geo.geometry);
 
         const extent = bounds;   
@@ -209,7 +183,7 @@ const regflow = {
         let rain_avg_weighted_points = [];
         let isobands = [];
 
-        turf.featureEach(isolines_json, function(rainFeature, rainIndex){
+        turf.featureEach(rainfallLayer, function(rainFeature, rainIndex){
             //Check point inside Rainfall Band
             var pts = turf.pointsWithinPolygon(point_grids, rainFeature);
 
@@ -217,14 +191,6 @@ const regflow = {
             if(pts.features.length > 0){
                 //Each Basin Features to Check
                 turf.featureEach(basin_border_geo, function(basinFeature, basinIndex){
-                    const basinType = turf.getType(basinFeature)
-                    //console.log("Basin["+basinType+"]: ", basinFeature);
-
-                    if(basinType == "Polygon"){
-                        //console.log("Try convert Polygon to Line...")
-                        basinFeature = turf.polygonToLine(basinFeature);
-                    }
-
                     //Get a intersection of BasinPolygon to IsobandPolygon
                     var isoband = turf.intersect(basinFeature, rainFeature);
                     //console.log("Isoband: ", isoband);
@@ -249,8 +215,8 @@ const regflow = {
             }
         });
 
-        avg_rain_areas  = this.calculateAvgByWeight(rain_avg_weighted_areas);
-        avg_rain_points = this.calculateAvgByWeight(rain_avg_weighted_points);
+        const avg_rain_areas  = this.calculateAvgByWeight(rain_avg_weighted_areas);
+        const avg_rain_points = this.calculateAvgByWeight(rain_avg_weighted_points);
         //Return calculated Weighted By {Point,Area}
         //return (weighted_by == 'points') ? avg_rain_points : avg_rain_areas;
         //let rainfall_avg = (weighted_by == 'points') ? avg_rain_points : avg_rain_areas;
@@ -262,6 +228,7 @@ const regflow = {
      */
     calculateAvgByWeight(values){
         var total_weight = _.sumBy(values, function(o){ return o.weight });
+        if (!Number.isFinite(total_weight) || total_weight <= 0) return null;
         var aux_vals = [];
 
         //$.each(values, function(k,v){
@@ -314,7 +281,7 @@ const regflow = {
      */
     calculateQmin(region, time, coef_a, coef_b, qls_m3s, dmonth){
         var xt = this.getXTCoef(region, time);
-        ret = xt * (coef_a + coef_b * dmonth) * qls_m3s;
+        var ret = xt * (coef_a + coef_b * dmonth) * qls_m3s;
         return ret;
     },
 
@@ -471,8 +438,8 @@ const regflow = {
             u: [0.594, 0.518, 0.469, 0.433, 0.330, 0.240]
           }
 
-        $.each(regions, function(region){
-            rets.push(regions[region][time]);
+        _.each(regions, function(values){
+            rets.push(values[time]);
         });
 
         return _.mean(rets);
@@ -483,7 +450,7 @@ const regflow = {
      * @param {String} regions
      * @param {Int} time {10,15,20,25,50,100}
      */
-    getXTCoef(region, time){  
+    getXTCoef(region, time){
         var regions = {
       
             //Region R
@@ -526,7 +493,12 @@ const regflow = {
             u: [0.594, 0.518, 0.469, 0.433, 0.330, 0.240]
           }
 
-        var ret = regions[region.toLowerCase()][time];
+        var normalizedRegion = String(region || '').toLowerCase();
+        var periodIndex = Number(time);
+        if (!regions[normalizedRegion] || !Number.isInteger(periodIndex) || periodIndex < 0 || periodIndex >= return_periods.length) {
+            throw new RangeError('Invalid region or return period index');
+        }
+        var ret = regions[normalizedRegion][periodIndex];
         console.log("Get XT Region=",region,", T=",return_periods[time]," => ", ret);
         return ret;
     },
@@ -612,19 +584,33 @@ const regflow = {
      */
     async getElevationByCoords(lat,lon){
         var token = process.env.MAPBOX_TOKEN;
-        const query = await fetch(
-            `https://api.mapbox.com/v4/mapbox.mapbox-terrain-v2/tilequery/${lon},${lat}.json?layers=contour&limit=50&access_token=${token}`,
-            { method: 'GET' }
-        );
+        if (!token || typeof fetch !== 'function') return null;
 
-        if (query.status !== 200) return;
+        const controller = new AbortController();
+        const timeout = setTimeout(() => controller.abort(), 4000);
+        let query;
+        try {
+            query = await fetch(
+                `https://api.mapbox.com/v4/mapbox.mapbox-terrain-v2/tilequery/${lon},${lat}.json?layers=contour&limit=50&access_token=${token}`,
+                { method: 'GET', signal: controller.signal }
+            );
+        } catch (error) {
+            return null;
+        } finally {
+            clearTimeout(timeout);
+        }
+
+        if (!query.ok) return null;
     
         const data = await query.json();
         // Get all the returned features.
         const allFeatures = data.features;
         //console.log(allFeatures);
         // For each returned feature, add elevation data to the elevations array.
-        const elevations = allFeatures.map((feature) => feature.properties.ele);
+        const elevations = allFeatures
+            .map((feature) => Number(feature.properties.ele))
+            .filter(Number.isFinite);
+        if (elevations.length === 0) return null;
         //console.log(elevations);
         // In the elevations array, find the largest value.
         const highestElevation = Math.max(...elevations);
