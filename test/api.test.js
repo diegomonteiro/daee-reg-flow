@@ -36,6 +36,10 @@ test('serves the main map interface with security headers', async () => {
   assert.match(html, /Desenhar bacia/);
   assert.match(html, /Minha localização/);
   assert.match(html, /Calcular vazão/);
+  assert.match(html, /id="toggle-results-sidebar"/);
+  assert.match(html, /id="restore-search-panel"/);
+  assert.match(html, /id="toggle-panels-visibility"/);
+  assert.match(html, /id="partial-basin"/);
 });
 
 test('rejects invalid coordinates with JSON and status 400', async () => {
@@ -116,9 +120,19 @@ test('calculates a real São Paulo basin with finite area-weighted results and p
   const taquariResp = await fetch(`${baseUrl}/api/coords_join/-24.037685/-48.886414`);
   const taquariData = await taquariResp.json();
   assert.equal(taquariResp.status, 200);
+  assert.equal(taquariData.partial_basin, true);
   assert.equal(taquariData.ottobacia.properties.COBACIA, '8649298');
   assert.ok(taquariData.area_km2 > 260 && taquariData.area_km2 < taquariData.full_area_km2);
   assert.ok(taquariData.area_proportion > 0.88 && taquariData.area_proportion < 0.96);
+
+  const taquariFullResp = await fetch(`${baseUrl}/api/coords_join/-24.037685/-48.886414?partial_basin=false`);
+  const taquariFullData = await taquariFullResp.json();
+  assert.equal(taquariFullResp.status, 200);
+  assert.equal(taquariFullData.partial_basin, false);
+  assert.equal(taquariFullData.area_proportion, 1);
+  assert.equal(taquariFullData.cross_section, null);
+  assert.ok(Math.abs(taquariFullData.area_km2 - taquariFullData.full_area_km2) < 1e-6);
+  assert.ok(taquariFullData.avg_discharge > taquariData.avg_discharge);
 });
 
 test('classifies the highest stream endpoint as upstream and the lowest as downstream', async () => {
@@ -334,4 +348,63 @@ test('accepts official border and self-intersecting ottobacias in editor and sim
     body: JSON.stringify({ geometry: officialBasin, scenarios: [{ id: 'historical-1980', name: 'Histórica' }] })
   });
   assert.equal(simResponse.status, 200);
+});
+
+test('simulates flow regularization scenarios using DAEE Equation 14 and Equation 15 (Rio Buquira example)', async () => {
+  const catalogRes = await fetch(`${baseUrl}/api/regularization_catalog`);
+  assert.equal(catalogRes.status, 200);
+  const catalog = await catalogRes.json();
+  assert.equal(catalog.k_seconds_per_month, 2628000);
+  assert.equal(catalog.regions.length, 21);
+  assert.equal(catalog.example.region, 'H');
+
+  const simRes = await fetch(`${baseUrl}/api/regularization_simulation`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      base: { region: 'H', avg_discharge_m3s: 9.48 },
+      scenarios: [
+        { name: 'Rio Buquira T=10 (10%)', qf_m3s: 5.0, return_period_years: 10 },
+        { name: 'Rio Buquira T=25 (4%)', qf_m3s: 5.0, failure_probability_percent: 4 },
+        { name: 'Rio Buquira Fio d’água', qf_m3s: 2.0, return_period_years: 10 }
+      ]
+    })
+  });
+  assert.equal(simRes.status, 200);
+  const simData = await simRes.json();
+  assert.equal(simData.scenarios.length, 3);
+
+  const buquira10 = simData.scenarios[0];
+  assert.equal(buquira10.xt, 0.748);
+  assert.equal(buquira10.coef_a, 0.4951);
+  assert.equal(buquira10.coef_b, 0.0279);
+  assert.ok(Math.abs(buquira10.q1_t_m3s - 3.7087) < 0.02);
+  assert.ok(Math.abs(buquira10.volume_hm3 - 7.3625) < 0.05);
+  assert.ok(Math.abs(buquira10.critical_duration_months - 3.7625) < 0.05);
+  assert.equal(buquira10.status, 'valid_intra_annual');
+  assert.equal(buquira10.monthly_series.length, 12);
+
+  const buquira25 = simData.scenarios[1];
+  assert.equal(buquira25.return_period_years, 25);
+  assert.ok(buquira25.volume_hm3 > buquira10.volume_hm3);
+
+  const runOfRiver = simData.scenarios[2];
+  assert.equal(runOfRiver.status, 'run_of_river');
+  assert.equal(runOfRiver.volume_m3, 0);
+  assert.equal(runOfRiver.critical_duration_months, 0);
+});
+
+test('serves Swagger UI at /api-docs and OpenAPI 3.0 specification at /api/openapi.json', async () => {
+  const docsRes = await fetch(`${baseUrl}/api-docs`);
+  const docsHtml = await docsRes.text();
+  assert.equal(docsRes.status, 200);
+  assert.match(docsHtml, /SwaggerUIBundle/);
+  assert.match(docsHtml, /\/api\/openapi\.json/);
+
+  const specRes = await fetch(`${baseUrl}/api/openapi.json`);
+  const spec = await specRes.json();
+  assert.equal(specRes.status, 200);
+  assert.equal(spec.openapi, '3.0.3');
+  assert.ok(spec.paths['/api/coords_join/{lat}/{lon}']);
+  assert.ok(spec.paths['/api/regularization_simulation']);
 });
