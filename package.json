@@ -10,7 +10,11 @@
     "dev": "nodemon ./bin/www",
     "test": "node --test",
     "test:coverage": "node --experimental-test-coverage --test",
-    "check": "node --check app.js && node --check bin/www && node --check routes/index.js && node --check routes/apis.js && node --check models/regflow.js && node --check test/api.test.js && node --check test/regflow.test.js"
+    "check": "node --check app.js && node --check bin/www && node --check routes/index.js && node --check routes/apis.js && node --check models/regflow.js && node --check test/api.test.js && node --check test/regflow.test.js",
+    "docker:build": "docker compose build",
+    "docker:up": "docker compose up -d --build",
+    "docker:down": "docker compose down",
+    "docker:logs": "docker compose logs -f"
   },
   "dependencies": {
     "@turf/turf": "^6.5.0",

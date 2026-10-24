@@ -10,12 +10,12 @@
   <link rel="preconnect" href="https://tile.openstreetmap.org">
   <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin="anonymous">
   <link rel="stylesheet" href="https://unpkg.com/@geoman-io/leaflet-geoman-free@2.20.0/dist/leaflet-geoman.css">
-  <link rel="stylesheet" href="/stylesheets/style.css?v=20261024a">
+  <link rel="stylesheet" href="<%= basePath %>/stylesheets/style.css?v=20261024a">
 </head>
 <body>
   <header class="app-header">
-    <a class="brand" href="/" aria-label="SP-ÁGUAS — REG-FLOW, página inicial">
-      <img class="institution-logo" src="/images/SP-%C3%81guas-Branco.png" alt="" width="2016" height="1341">
+    <a class="brand" href="<%= basePath || '/' %>" aria-label="SP-ÁGUAS — REG-FLOW, página inicial">
+      <img class="institution-logo" src="<%= basePath %>/images/SP-%C3%81guas-Branco.png" alt="" width="2016" height="1341">
       <span class="brand-divider" aria-hidden="true"></span><span class="brand-name">REG-FLOW</span><span class="brand-divider brand-divider-secondary" aria-hidden="true"></span>
       <span class="brand-subtitle">Regionalização de vazões</span>
     </a>
@@ -356,6 +356,8 @@
   <script>
   (() => {
     'use strict';
+    const serverBasePath = <%- JSON.stringify(basePath || '') %>;
+    const apiBase = serverBasePath || (location.pathname === '/reg-flow' || location.pathname.startsWith('/reg-flow/') ? '/reg-flow' : '');
     const byId = id => document.getElementById(id);
     const form = byId('coordinate-form'), latInput = byId('latitude'), lonInput = byId('longitude'), partialBasinInput = byId('partial-basin'), includeUpstreamInput = byId('include-upstream');
     const calculateButton = byId('calculate-button'), locateButton = byId('locate-button'), searchPanel = byId('search-panel');
@@ -546,7 +548,7 @@
       if (includeUpstreamInput?.checked) params.set('include_upstream', 'true');
       if (partialBasinInput && !partialBasinInput.checked) params.set('partial_basin', 'false');
       const query = params.toString() ? `?${params.toString()}` : '';
-      try { const response = await fetch(`/api/coords_join/${encodeURIComponent(lat)}/${encodeURIComponent(lon)}${query}`, { signal: controller.signal }); const data = await response.json().catch(() => ({})); if (!response.ok) throw new Error(data.error === 'Point outside SP' ? 'O ponto informado está fora do Estado de São Paulo.' : data.error || 'Não foi possível calcular para este ponto.'); render(data); toast('Cálculo realizado com sucesso.'); history.replaceState(null, '', `#${map.getZoom()}/${Number(lat).toFixed(6)}/${Number(lon).toFixed(6)}`); }
+      try { const response = await fetch(`${apiBase}/api/coords_join/${encodeURIComponent(lat)}/${encodeURIComponent(lon)}${query}`, { signal: controller.signal }); const data = await response.json().catch(() => ({})); if (!response.ok) throw new Error(data.error === 'Point outside SP' ? 'O ponto informado está fora do Estado de São Paulo.' : data.error || 'Não foi possível calcular para este ponto.'); render(data); toast('Cálculo realizado com sucesso.'); history.replaceState(null, '', `#${map.getZoom()}/${Number(lat).toFixed(6)}/${Number(lon).toFixed(6)}`); }
       catch (error) { if (error.name === 'AbortError') return; loading.hidden = true; empty.hidden = false; empty.querySelector('h3').textContent = 'Não foi possível calcular'; empty.querySelector('p').textContent = error.message; toast(error.message, 'error'); }
       finally { calculateButton.disabled = false; locateButton.disabled = false; startDrawingButton.disabled = false; calculateButton.classList.remove('loading'); }
     }
@@ -607,7 +609,7 @@
       setDrawingMode(false);
       controller?.abort(); controller = new AbortController(); setLoading(true);
       try {
-        const response = await fetch('/api/geometry_calculate', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ geometry }), signal: controller.signal });
+        const response = await fetch(`${apiBase}/api/geometry_calculate`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ geometry }), signal: controller.signal });
         const data = await response.json().catch(() => ({}));
         if (!response.ok) {
           const messages = { 'The geometry must be entirely within the State of São Paulo': 'A geometria deve estar inteiramente dentro do Estado de São Paulo.', 'The geometry cannot contain self-intersections': 'A geometria possui cruzamentos. Redesenhe a bacia sem cruzar as linhas.' };
@@ -642,7 +644,7 @@
     }
     async function openIsohyetEditor(scenario) {
       try {
-        const response = await fetch('/api/isohyet_editor_layer', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ layerId: scenario.id, geometry: lastCalculation.ottobacia }) }); const data = await response.json();
+        const response = await fetch(`${apiBase}/api/isohyet_editor_layer`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ layerId: scenario.id, geometry: lastCalculation.ottobacia }) }); const data = await response.json();
         if (!response.ok) throw new Error(data.error || 'Não foi possível carregar a camada.');
         editingIsohyetSource = scenario; isIsohyetEditing = true; document.body.classList.add('isohyet-editing'); simulationDialog.close(); closeResults(); clearSimulationLayers();
         isohyetEditor.hidden = false; renderIsohyetEditorLayer(data); text('isohyet-editor-status', 'Selecione uma faixa no mapa.');
@@ -665,7 +667,7 @@
       try {
         const payload = JSON.stringify({ layer: editingIsohyetGroup.toGeoJSON(), region, percentage }); const headers = { 'Content-Type': 'application/json' }; let body = payload;
         if ('CompressionStream' in window) { body = await new Response(new Blob([payload]).stream().pipeThrough(new CompressionStream('gzip'))).blob(); headers['Content-Encoding'] = 'gzip'; }
-        const response = await fetch('/api/isohyet_adjust', { method: 'POST', headers, body }); const data = await response.json().catch(() => ({}));
+        const response = await fetch(`${apiBase}/api/isohyet_adjust`, { method: 'POST', headers, body }); const data = await response.json().catch(() => ({}));
         if (!response.ok) throw new Error(data.error || 'Não foi possível aplicar a variação regional.');
         map.removeLayer(regionLayer); renderIsohyetEditorLayer(data); text('isohyet-editor-status', `Variação de ${percentage > 0 ? '+' : ''}${number(percentage, 0)}% aplicada à região desenhada.`);
       } catch (error) { if (map.hasLayer(regionLayer)) map.removeLayer(regionLayer); text('isohyet-editor-status', error.message); toast(error.message, 'error'); }
@@ -809,7 +811,7 @@
           body = await new Response(stream).blob();
           headers['Content-Encoding'] = 'gzip';
         }
-        const response = await fetch('/api/isohyet_simulation', { method: 'POST', headers, body });
+        const response = await fetch(`${apiBase}/api/isohyet_simulation`, { method: 'POST', headers, body });
         const data = await response.json().catch(() => ({}));
         if (!response.ok) throw new Error(data.error || (response.status === 413 ? 'O servidor ou proxy recusou o tamanho da requisição.' : 'Não foi possível executar a simulação.'));
         renderComparison(data.scenarios); simulationStatus.textContent = 'Simulação concluída.'; byId('comparison-results').scrollIntoView({ behavior: 'smooth', block: 'start' });
@@ -819,7 +821,7 @@
     async function openSimulation() {
       if (!lastCalculation) return toast('Calcule uma bacia antes de iniciar a simulação.', 'error');
       if (!catalogIsohyets.length) {
-        try { const response = await fetch('/api/isohyet_catalog'); if (response.ok) catalogIsohyets = await response.json(); }
+        try { const response = await fetch(`${apiBase}/api/isohyet_catalog`); if (response.ok) catalogIsohyets = await response.json(); }
         catch (_) { /* A camada histórica de fallback continua disponível. */ }
       }
       renderScenarioList(); simulationDialog.showModal();
@@ -921,7 +923,7 @@
 
     async function ensureRegCatalog() {
       if (regCatalog) return regCatalog;
-      const response = await fetch('/api/regularization_catalog');
+      const response = await fetch(`${apiBase}/api/regularization_catalog`);
       if (!response.ok) throw new Error('Não foi possível carregar a tabela de parâmetros regionais.');
       regCatalog = await response.json();
       regRegionSelect.replaceChildren();
@@ -1327,7 +1329,7 @@
       runRegSimulationButton.classList.add('loading');
       regSimulationStatus.textContent = 'Calculando volume de regularização (Equação 14) e duração crítica (Equação 15)…';
       try {
-        const response = await fetch('/api/regularization_simulation', {
+        const response = await fetch(`${apiBase}/api/regularization_simulation`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ base, scenarios: regQueuedScenarios })

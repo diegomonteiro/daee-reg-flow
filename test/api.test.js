@@ -407,4 +407,44 @@ test('serves Swagger UI at /api-docs and OpenAPI 3.0 specification at /api/opena
   assert.equal(spec.openapi, '3.0.3');
   assert.ok(spec.paths['/api/coords_join/{lat}/{lon}']);
   assert.ok(spec.paths['/api/regularization_simulation']);
+  assert.ok(spec.paths['/api/health']);
+
+  const healthRes = await fetch(`${baseUrl}/api/health`);
+  const health = await healthRes.json();
+  assert.equal(healthRes.status, 200);
+  assert.equal(health.status, 'ok');
+  assert.equal(health.layers_loaded, true);
+  assert.ok(health.ottobacias_count > 0);
+
+  const healthzRes = await fetch(`${baseUrl}/healthz`);
+  const healthz = await healthzRes.json();
+  assert.equal(healthzRes.status, 200);
+  assert.equal(healthz.status, 'ok');
+});
+
+test('serves application, static assets, APIs and Swagger UI under /reg-flow subpath', async () => {
+  const indexRes = await fetch(`${baseUrl}/reg-flow`);
+  const indexHtml = await indexRes.text();
+  assert.equal(indexRes.status, 200);
+  assert.match(indexHtml, /href="\/reg-flow\/stylesheets\/style\.css/);
+  assert.match(indexHtml, /src="\/reg-flow\/images\/SP-%C3%81guas-Branco\.png"/);
+  assert.match(indexHtml, /const serverBasePath = "\/reg-flow"/);
+
+  const cssRes = await fetch(`${baseUrl}/reg-flow/stylesheets/style.css`);
+  assert.equal(cssRes.status, 200);
+
+  const healthRes = await fetch(`${baseUrl}/reg-flow/api/health`);
+  const health = await healthRes.json();
+  assert.equal(healthRes.status, 200);
+  assert.equal(health.status, 'ok');
+
+  const docsRes = await fetch(`${baseUrl}/reg-flow/api-docs`);
+  const docsHtml = await docsRes.text();
+  assert.equal(docsRes.status, 200);
+  assert.match(docsHtml, /href="\/reg-flow\/api\/openapi\.json"/);
+
+  const specRes = await fetch(`${baseUrl}/reg-flow/api/openapi.json`);
+  const spec = await specRes.json();
+  assert.equal(specRes.status, 200);
+  assert.equal(spec.servers[0].url, '/reg-flow');
 });

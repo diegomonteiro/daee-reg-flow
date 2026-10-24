@@ -25,8 +25,48 @@ npm ci
 npm run dev
 ```
 
-- Aplicação principal (Mapa): `http://localhost:3001`
-- Documentação interativa Swagger UI: `http://localhost:3001/api-docs`
+- Aplicação principal (Mapa): `http://localhost:3001` (ou `http://localhost:3001/reg-flow`)
+- Documentação interativa Swagger UI: `http://localhost:3001/api-docs` (ou `http://localhost:3001/reg-flow/api-docs`)
+- Healthcheck da aplicação e camadas em memória: `http://localhost:3001/api/health` (ou `http://localhost:3001/reg-flow/api/health`)
+
+## Execução em Produção com Docker Compose (Subpath `/reg-flow`)
+
+O projeto inclui [`Dockerfile`](Dockerfile) multi-stage otimizado (`node:24-alpine`, usuário não-root `node`, `HEALTHCHECK` nativo e *graceful shutdown* `SIGTERM`/`SIGINT`) e [`docker-compose.yml`](docker-compose.yml) configurado para rodar sob o subpath **`/reg-flow`** (`BASE_PATH=/reg-flow`) atrás do **Nginx já existente no servidor**:
+
+### 1. Subir o container da aplicação
+```bash
+cp .env.example .env   # Opcional: configure MAPBOX_TOKEN se desejar cota altimétrica
+docker compose up -d --build
+```
+*(Ou via npm: `npm run docker:up`)*
+
+### 2. Configuração recomendada no Nginx existente do servidor
+Adicione o bloco abaixo no `server { ... }` do Nginx já instalado no servidor (a aplicação aceita requisições tanto mantendo `/reg-flow` quanto com `X-Forwarded-Prefix`):
+```nginx
+location = /reg-flow {
+    return 301 $scheme://$http_host/reg-flow/;
+}
+
+location /reg-flow/ {
+    proxy_pass http://127.0.0.1:3001/reg-flow/;
+    proxy_http_version 1.1;
+    proxy_set_header Host $host;
+    proxy_set_header X-Real-IP $remote_addr;
+    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+    proxy_set_header X-Forwarded-Proto $scheme;
+    proxy_set_header X-Forwarded-Prefix /reg-flow;
+    client_max_body_size 65M;
+    proxy_read_timeout 120s;
+    proxy_send_timeout 120s;
+}
+```
+
+### 3. Monitoramento e encerramento
+```bash
+docker compose ps
+docker compose logs -f
+docker compose down
+```
 
 ## Verificações
 

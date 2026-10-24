@@ -37,6 +37,32 @@
     }
   ],
   "paths": {
+    "/api/health": {
+      "get": {
+        "tags": ["Camadas Base e Cadastros"],
+        "summary": "Healthcheck de prontidão da aplicação e dos índices espaciais em memória",
+        "description": "Verifica se o servidor HTTP e os índices geoespaciais em memória (`ottobacias_sp.json`, `basinBounds`) estão carregados e operacionais. Utilizado pelo `HEALTHCHECK` do Docker Compose e balanceadores de carga.",
+        "responses": {
+          "200": {
+            "description": "Serviço saudável e camadas carregadas.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "status": { "type": "string", "example": "ok" },
+                    "uptime_s": { "type": "integer", "example": 120 },
+                    "timestamp": { "type": "string", "format": "date-time" },
+                    "layers_loaded": { "type": "boolean", "example": true },
+                    "ottobacias_count": { "type": "integer", "example": 869 }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/coords_join/{lat}/{lon}": {
       "get": {
         "tags": ["Consulta Espacial e Bacias"],

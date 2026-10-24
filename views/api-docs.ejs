@@ -92,16 +92,16 @@
 </head>
 <body>
   <header class="docs-header">
-    <a class="docs-brand" href="/" aria-label="SP-ÁGUAS — REG-FLOW, voltar ao mapa">
-      <img class="docs-logo" src="/images/SP-%C3%81guas-Branco.png" alt="" width="2016" height="1341">
+    <a class="docs-brand" href="<%= basePath || '/' %>" aria-label="SP-ÁGUAS — REG-FLOW, voltar ao mapa">
+      <img class="docs-logo" src="<%= basePath %>/images/SP-%C3%81guas-Branco.png" alt="" width="2016" height="1341">
       <span class="docs-divider" aria-hidden="true"></span>
       <span class="docs-brand-name">REG-FLOW</span>
       <span class="docs-divider" aria-hidden="true"></span>
       <span class="docs-subtitle">Swagger / OpenAPI 3.0</span>
     </a>
     <div class="docs-actions">
-      <a class="docs-link" href="/api/openapi.json" target="_blank" rel="noopener">Baixar openapi.json</a>
-      <a class="docs-link" href="/">Voltar ao Mapa</a>
+      <a class="docs-link" href="<%= basePath %>/api/openapi.json" target="_blank" rel="noopener">Baixar openapi.json</a>
+      <a class="docs-link" href="<%= basePath || '/' %>">Voltar ao Mapa</a>
     </div>
   </header>
 
@@ -112,8 +112,10 @@
   <script src="https://unpkg.com/swagger-ui-dist@5/swagger-ui-bundle.js" crossorigin="anonymous"></script>
   <script>
     window.addEventListener('DOMContentLoaded', function () {
+      const serverBasePath = <%- JSON.stringify(basePath || '') %>;
+      const apiBase = serverBasePath || (location.pathname === '/reg-flow' || location.pathname.startsWith('/reg-flow/') ? '/reg-flow' : '');
       window.ui = SwaggerUIBundle({
-        url: '/api/openapi.json',
+        url: `${apiBase}/api/openapi.json`,
         dom_id: '#swagger-ui',
         deepLinking: true,
         docExpansion: 'list',

@@ -939,8 +939,31 @@ router.get('/find_coefs_by_region/:lat/:lon', function(req,res,next){
  */
 const openApiSpec = require('../public/openapi.json');
 
+router.get('/health', function(req, res) {
+    const ottobaciasCount = Array.isArray(basinBounds) ? basinBounds.length : 0;
+    const layersLoaded = ottobaciasCount > 0;
+    res.status(layersLoaded ? 200 : 503).json({
+        status: layersLoaded ? 'ok' : 'degraded',
+        uptime_s: Math.round(process.uptime()),
+        timestamp: new Date().toISOString(),
+        layers_loaded: layersLoaded,
+        ottobacias_count: ottobaciasCount
+    });
+});
+
 router.get('/openapi.json', function(req, res) {
-    res.status(200).json(openApiSpec);
+    const activeBasePath = req.app && req.app.locals && typeof req.app.locals.resolveBasePath === 'function'
+        ? req.app.locals.resolveBasePath(req)
+        : '';
+    res.status(200).json({
+        ...openApiSpec,
+        servers: [
+            {
+                url: activeBasePath || '/',
+                description: activeBasePath ? `Servidor atual (subpath ${activeBasePath})` : 'Servidor local / ambiente atual'
+            }
+        ]
+    });
 });
 
 router.get('/regularization_catalog', function(req, res) {

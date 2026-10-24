@@ -1,0 +1,41 @@
+services:
+  regflow:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: spaguas/daee-reg-flow:latest
+    container_name: daee-reg-flow
+    restart: unless-stopped
+    env_file:
+      - path: .env
+        required: false
+    environment:
+      NODE_ENV: ${NODE_ENV:-production}
+      PORT: 3001
+      HOST: 0.0.0.0
+      BASE_PATH: ${BASE_PATH:-/reg-flow}
+      TRUST_PROXY: ${TRUST_PROXY:-1}
+      MAPBOX_TOKEN: ${MAPBOX_TOKEN:-}
+      API_TOKEN: ${API_TOKEN:-}
+      NODE_OPTIONS: ${NODE_OPTIONS:---max-old-space-size=1024}
+    ports:
+      - "${HOST_PORT:-3001}:3001"
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3001/reg-flow/api/health').then(r => process.exit(r.ok ? 0 : 1)).catch(() => process.exit(1))"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
+    deploy:
+      resources:
+        limits:
+          memory: 1536M
+        reservations:
+          memory: 512M
+    security_opt:
+      - no-new-privileges:true
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
