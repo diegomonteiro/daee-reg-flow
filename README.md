@@ -1,6 +1,17 @@
 # REG-FLOW
 
-Sistema web de regionalização de vazões para o Estado de São Paulo.
+Sistema web de regionalização de vazões e simulação de regularização intra-anual para o Estado de São Paulo (**SP-ÁGUAS / DAEE**).
+
+## Documentação Completa e Swagger (OpenAPI 3.0)
+
+Para facilitar o entendimento por servidores, engenheiros e ferramentas de IA (**Vibecoding**), o projeto conta com documentação técnica modular e especificação OpenAPI interativa:
+
+- **Swagger UI Interativo (Browser)**: `http://localhost:3001/api-docs` (ou `/api/docs`)
+- **Especificação OpenAPI 3.0.3 (JSON)**: `http://localhost:3001/api/openapi.json` ([`public/openapi.json`](public/openapi.json))
+- **[Arquitetura do Sistema (`docs/ARCHITECTURE.md`)](docs/ARCHITECTURE.md)**: Diagramas de arquitetura, índices espaciais em memória (`basinBounds`, `ottotrechosByBasin`, grafo Pfafstetter), fluxo de requisições, segurança (CSP, gzip, rate limit) e estrutura do frontend.
+- **[Metodologia Hidrológica e Algoritmos (`docs/METHODOLOGY.md`)](docs/METHODOLOGY.md)**: Detalhamento completo do estudo oficial do DAEE (1988) — Equações (1) a (22), cálculo de $V_c$ e $d_c$, exemplo do Rio Buquira (Região H), algoritmo de corte transversal (`splitBasinUpstreamByPoint`) e agregação à montante por ottocodificação (`collectUpstreamBasinCodes`).
+- **[Referência da API REST (`docs/API_REFERENCE.md`)](docs/API_REFERENCE.md)**: Tabela completa dos 21 endpoints, parâmetros de query, payloads, exemplos `curl` e códigos HTTP.
+- **[Guia de Vibecoding e Contexto para IA (`docs/VIBECODING_GUIDE.md`)](docs/VIBECODING_GUIDE.md)** e **[`AGENTS.md`](AGENTS.md)**: Mapa rápido de arquivos/funções, invariantes críticos e receitas de prompts para evolução segura assistida por IA.
 
 ## Requisitos
 
@@ -14,7 +25,8 @@ npm ci
 npm run dev
 ```
 
-A aplicação estará disponível em `http://localhost:3001`.
+- Aplicação principal (Mapa): `http://localhost:3001`
+- Documentação interativa Swagger UI: `http://localhost:3001/api-docs`
 
 ## Verificações
 
@@ -37,48 +49,36 @@ cp .env.example .env
 ## Fluxo principal
 
 1. Informe latitude e longitude em graus decimais, use a localização do dispositivo ou clique no mapa.
-2. Selecione **Calcular vazão**.
-3. Confira a bacia, a área de contribuição à montante (e sua proporção em relação à ottobacia completa), regiões, coeficientes, precipitação média, vazão média, Q95% e Q7,10 no painel.
+2. Escolha se deseja o **Cálculo parcial da bacia (somente área à montante do ponto)** (`#partial-basin`, marcado por padrão) ou desmarque para calcular **100% da ottobacia inteira**.
+3. Opcionalmente, marque **Considerar bacias à montante até a nascente (ottocodificação)** (`#include-upstream`) para agregar todas as ottobacias tributárias à montante.
+4. Selecione **Calcular vazão**.
+5. Confira a bacia, a área de contribuição (e sua proporção em relação à ottobacia completa), regiões, coeficientes, precipitação média, vazão média, Q95% e Q7,10 no painel lateral.
 
-Ao selecionar um ponto por coordenadas ou clique no mapa, o sistema localiza a ottobacia e o ottotrecho associado, projeta o ponto clicado sobre o trecho de drenagem mais próximo e traça uma linha de seção transversal até tocar as duas extremidades laterais mais próximas da bacia (utilizando a tangente macro suavizada do trecho e selecionando a menor corda transversal que intercepta o curso d'água sem cruzar para fora da bacia, evitando distorções por micro-meandros ou lóbulos côncavos). A ottobacia é seccionada por essa linha e os cálculos hidrológicos (área, precipitação média ponderada e coeficientes RAU/XYZ) são realizados espacialmente sobre o **polígono contíguo da sub-bacia de contribuição à montante** do ponto (ou 100% da ottobacia se a projeção coincidir com o extremo do trecho). No mapa são exibidos o contorno tracejado da ottobacia completa, o polígono preenchido da área de contribuição à montante, a linha de seção transversal e o ponto projetado no trecho. Com `MAPBOX_TOKEN` (ou `API_TOKEN`) configurado, a aplicação consulta a elevação do primeiro e do último ponto da linha: o extremo de maior cota é identificado como **Ponto Montante** e o de menor cota como **Ponto Jusante**. Quando a consulta de altitude não estiver disponível ou resultar em empate de cotas, o sentido montante/jusante é determinado pela topologia oficial da rede (`COBACIAJUS`).
+> **Controles de visualização dos painéis**:
+> - O sidebar lateral de **Resultados** possui uma aba na borda direita da tela (`#toggle-results-sidebar`) com seta para colapsar e expandir o painel a qualquer momento.
+> - O painel **Consultar vazão** pode ser recolhido individualmente pelo botão no canto superior direito do card (`#close-search`) e restaurado pelo botão flutuante **Consultar vazão** (`#restore-search-panel`).
+> - O botão **Ocultar painéis / Mostrar painéis** (`#toggle-panels-visibility`) no cabeçalho recolhe ou restaura todos os painéis sobre o mapa de uma só vez.
 
-Opcionalmente, marque **Considerar bacias à montante até a nascente (ottocodificação)** no painel de consulta para agregar toda a árvore hidrográfica à montante (via relação `COBACIA` / `COBACIAJUS` até as cabeceiras): o sistema mantém o recorte proporcional na ottobacia do ponto selecionado e soma integralmente todas as ottobacias à montante, destacando os múltiplos polígonos e trechos de drenagem no mapa e listando as ottobacias consideradas no painel de resultados.
+Ao selecionar um ponto com o **Cálculo parcial da bacia** ativo (`partial_basin=true`), o sistema localiza a ottobacia e o ottotrecho associado, projeta o ponto clicado sobre o trecho de drenagem mais próximo e traça uma linha de seção transversal até tocar as duas extremidades laterais mais próximas da bacia (utilizando a tangente macro suavizada do trecho e selecionando a menor corda transversal que intercepta o curso d'água sem cruzar para fora da bacia). Quando desmarcado (`partial_basin=false`), o cálculo utiliza 100% da geometria oficial da ottobacia.
 
-Como fluxo adicional, selecione **Desenhar bacia**, marque os vértices com o Leaflet-Geoman e feche o polígono clicando no primeiro vértice. Nesse modo, as variáveis são calculadas diretamente a partir da geometria desenhada (até 5.000 vértices, sem autointerseções e contida no Estado de São Paulo); o fluxo por coordenadas utiliza a sub-bacia proporcional à montante do ponto dentro da ottobacia correspondente.
+Opcionalmente, ao marcar **Considerar bacias à montante até a nascente (ottocodificação)** (`include_upstream=true`), o sistema percorre recursivamente a árvore hidrográfica à montante (via relação `COBACIA` / `COBACIAJUS` até as cabeceiras) e soma todas as ottobacias à montante, destacando os polígonos e trechos no mapa e listando cada ottobacia no painel de resultados.
 
-Ao concluir o desenho, o sistema cruza a geometria com a base oficial de ottobacias, colore no mapa cada área de interseção e apresenta uma lista ordenada. Para cada ottobacia são informados o código, a área intersectada, sua participação percentual na área desenhada e o percentual da própria ottobacia coberto pelo desenho.
+Como fluxo adicional, selecione **Desenhar bacia**, marque os vértices com o Leaflet-Geoman e feche o polígono clicando no primeiro vértice. Nesse modo, as variáveis são calculadas diretamente a partir da geometria desenhada (até 5.000 vértices, sem autointerseções e contida no Estado de São Paulo), exibindo também a lista e participação percentual de cada ottobacia oficial intersectada.
 
-Após qualquer cálculo, use **Simular outras isoietas** para comparar a camada histórica com até cinco camadas GeoJSON carregadas ou editadas pelo usuário (máximo de seis cenários por simulação). O arquivo deve conter feições `Polygon` ou `MultiPolygon` e informar a precipitação anual em milímetros (entre 1 e 10.000 mm) em uma destas propriedades: `ID`, `rain`, `precipitation`, `precipitacao`, `PRECIPITACAO`, `P` ou `mm`. As camadas precisam cobrir ao menos 95% da bacia. Cada arquivo pode ter até 25 MB, o conjunto de uploads até 50 MB (limite descompactado de 60 MB no servidor) e cada camada até 750 mil coordenadas. Navegadores compatíveis enviam a simulação compactada com gzip. Os uploads são processados em memória e não são armazenados.
+Após qualquer cálculo, use **Simular outras isoietas** para comparar a camada histórica com até cinco camadas GeoJSON carregadas ou editadas pelo usuário (máximo de seis cenários por simulação). O botão **Editar** na camada histórica abre o editor cartográfico para alterar valores de faixas, editar vértices ou aplicar variações percentuais (`-99%` a `500%`) sobre uma sub-região desenhada.
 
-A simulação mantém a geometria da bacia e os coeficientes RAU/XYZ constantes, recalculando precipitação média, vazão média, Q95% e Q7,10 para cada cenário. Os resultados são apresentados no gráfico, na tabela acessível e como sobreposições controláveis no mapa.
-
-Na camada histórica, o botão **Editar** abre o editor cartográfico da área da bacia. É possível selecionar uma faixa, alterar sua precipitação em milímetros, ativar a edição de vértices para mudar sua forma ou informar uma variação percentual (maior que -100% e até 500%) e desenhar a região onde ela será aplicada. Ao salvar, o sistema cria um novo cenário sem modificar a camada histórica original.
+Para avaliar o **Volume de Regularização Intra-Anual**, utilize **Regularização de vazão** no cabeçalho ou **Simular regularização de vazão** no painel de resultados. A funcionalidade implementa as **Equações (12), (13), (14) e (15)** da metodologia oficial do DAEE (*Regionalização Hidrológica no Estado de São Paulo*, 1988), determinando o volume necessário $V_c$ ($\text{m}^3$ e $\text{hm}^3$) e a duração crítica da estiagem $d_c$ (em meses, para $0 < d_c \le 6\text{ meses}$) para regularizar uma demanda firme $Q_F$ ($\text{m}^3/\text{s}$) associada a uma probabilidade $y\% = (100/T)\%$ de não atendimento em um ano qualquer ($T = 10, 15, 20, 25, 50, 100\text{ anos}$ ou personalizado). É possível simular até 12 cenários usando a **vazão calculada da bacia ($\overline{Q}$)**, informar $\overline{Q}$ diretamente, calcular por área e precipitação ou carregar o exemplo de referência do DAEE (Rio Buquira — Região H).
 
 ## Endpoints da API
 
-### Consulta espacial, geometria e simulação
+Consulte a documentação completa em [`docs/API_REFERENCE.md`](docs/API_REFERENCE.md) ou acesse `/api-docs` (Swagger UI):
 
-- `GET /api/coords_join/:lat/:lon`: calcula regionalização completa para a ottobacia correspondente às coordenadas, aceitando `?include_upstream=true` para agregar recursivamente todas as ottobacias à montante até a nascente pela ottocodificação (possui cache em memória por 15 minutos, informado no cabeçalho `X-Cache: HIT|MISS`).
-- `POST /api/geometry_calculate`: calcula regionalização e interseções com ottobacias oficiais a partir de uma feição GeoJSON (`Polygon` ou `MultiPolygon`) enviada em `{ geometry }`.
-- `GET /api/isohyet_catalog`: lista as camadas de isoietas do catálogo (`historical-1980`).
-- `GET /api/isohyet_catalog/:id`: retorna o GeoJSON de uma camada do catálogo.
-- `POST /api/isohyet_editor_layer`: recorta uma camada do catálogo (`{ layerId, geometry }`) para os limites da bacia.
-- `POST /api/isohyet_adjust`: aplica variação percentual (`{ layer, region, percentage }`) sobre as faixas de precipitação dentro da região informada.
-- `POST /api/isohyet_simulation`: executa a simulação comparativa de 1 a 6 cenários (`{ geometry, scenarios }`).
-- `GET /api/find_coefs/:lat/:lon` e `GET /api/find_coefs_by_region/:lat/:lon`: consultam os coeficientes das regiões hidrológicas (`RAU` e `RXYZ`) por coordenada.
-- `GET /api/municipios`, `GET /api/municipios/:cod_ibge`, `GET /api/ottobacias/:cod`, `GET /api/ottotrechos/:cod`: consultam as feições cadastradas nas camadas base.
-
-> As rotas de cálculo espacial e simulação possuem limite de taxa (*rate limit*) de 30 requisições por minuto por IP.
-
-### Cálculos hidrológicos diretos
-
-- `GET /api/calculate_discharge_avg/:coef_a/:coef_b/:avg_rainfall/:area_km2`: calcula a vazão média plurianual ($Q_{\text{média}}$) a partir dos parâmetros chuva-vazão (`A_MEDIA` e `B_MEDIA`), precipitação média (mm) e área ($\text{km}^2$).
-- `GET /api/calculate_q95/:region/:qls_m3s/:area_km2`: calcula a vazão com 95% de permanência ($Q_{95\%}$) para uma região (`a`–`u`).
-- `GET /api/calculate_qper/:region/:qls_m3s`: retorna a curva de permanência completa (5% a 100%) para a região.
-- `GET /api/calculate_q7_10/:region/:c/:val_a/:val_b/:qls_m3s`: calcula a vazão mínima de 7 dias e 10 anos de retorno ($Q_{7,10}$).
-- `GET /api/calculate_q7/:region/:c/:val_a/:val_b/:qls_m3s/:area_km2`: calcula as vazões mínimas $Q_{7,T}$ para os períodos de retorno de 10, 15, 20, 25, 50 e 100 anos.
-- `GET /api/calculate_minimal_discharge/:region/:time/:a/:b/:dmonth/:qls_m3s`: calcula a vazão mínima mensal ($Q_{\min}$) para índice de período de retorno `time` (`0` a `5`) e duração `dmonth` (`1` a `12` meses).
-- `GET /api/calculate_critical_duration/:qf/:xt/:a/:b/:qls_m3s` e `GET /api/calculate_critical_duration/:region/:time/:qf/:a/:b/:qls_m3s`: calculam a duração crítica (em meses).
-- `GET /api/calculate_volume_regularization/:qf/:xt/:a/:b/:d/:qls_m3s/:k` e `GET /api/calculate_max_volume_regularization/:qf/:region/:t/:a/:b/:qls_m3s/:months`: calculam o volume de regularização.
+- `GET /api-docs` e `GET /api/openapi.json`: interface Swagger UI e especificação OpenAPI 3.0.3.
+- `GET /api/coords_join/:lat/:lon`: calcula regionalização completa para a coordenada informada (aceita `?partial_basin=true|false` e `?include_upstream=true|false`).
+- `POST /api/geometry_calculate`: calcula regionalização e interseções com ottobacias oficiais a partir de uma feição GeoJSON (`Polygon` ou `MultiPolygon`).
+- `GET /api/regularization_catalog` e `POST /api/regularization_simulation`: catálogo de parâmetros regionais (`A`–`U`) e simulação de 1 a 12 cenários de regularização de vazão (Equações 12 a 15).
+- `GET /api/isohyet_catalog`, `GET /api/isohyet_catalog/:id`, `POST /api/isohyet_editor_layer`, `POST /api/isohyet_adjust` e `POST /api/isohyet_simulation`: catálogo, editor cartográfico e simulação comparativa de isoietas.
+- `GET /api/find_coefs/:lat/:lon`, `GET /api/find_coefs_by_region/:lat/:lon`, `GET /api/municipios`, `GET /api/municipios/:cod_ibge`, `GET /api/ottobacias/:cod`, `GET /api/ottotrechos/:cod`: consulta às camadas base.
+- Rotas de cálculo hidrológico direto: `/api/calculate_discharge_avg/...`, `/api/calculate_q95/...`, `/api/calculate_qper/...`, `/api/calculate_q7_10/...`, `/api/calculate_q7/...`, `/api/calculate_minimal_discharge/...`, `/api/calculate_critical_duration/...`, `/api/calculate_volume_regularization/...`, `/api/calculate_max_volume_regularization/...`.
 
 Os valores são estimativas e devem ser revisados antes de uso técnico ou decisório.

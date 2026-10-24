@@ -1,0 +1,721 @@
+{
+  "openapi": "3.0.3",
+  "info": {
+    "title": "SP-ÁGUAS | REG-FLOW — API de Regionalização Hidrológica",
+    "version": "1.2.0",
+    "description": "API RESTful do sistema **REG-FLOW** para regionalização hidrológica de vazões médias, mínimas ($Q_{7,10}$, $Q_{d,T}$), curvas de permanência ($Q_{95\\%}$), simulação de isoietas e cálculo de **Volume de Regularização Intra-Anual ($V_c$ e $d_c$)** no Estado de São Paulo, fundamentada na metodologia oficial do DAEE (1988) — *Regionalização Hidrológica no Estado de São Paulo* (Revista Águas e Energia Elétrica, Ano 5, nº 14).",
+    "contact": {
+      "name": "SP-ÁGUAS / Equipe Técnica REG-FLOW"
+    }
+  },
+  "servers": [
+    {
+      "url": "/",
+      "description": "Servidor local / ambiente atual"
+    }
+  ],
+  "tags": [
+    {
+      "name": "Consulta Espacial e Bacias",
+      "description": "Cálculo regionalizado completo por coordenadas geográficas (com corte transversal opcional e agregação de ottobacias à montante) ou por polígono desenhado."
+    },
+    {
+      "name": "Regularização de Vazão (DAEE Eq. 14 e 15)",
+      "description": "Catálogo de parâmetros regionais (Regiões A a U) e simulação multi-cenário de volume de armazenamento intra-anual (Vc) e duração crítica (dc)."
+    },
+    {
+      "name": "Simulação e Editor de Isoietas",
+      "description": "Catálogo de isoietas históricas, recorte cartográfico, aplicação de variações percentuais regionais e simulação comparativa de cenários pluviométricos."
+    },
+    {
+      "name": "Cálculos Hidrológicos Diretos",
+      "description": "Funções matemáticas diretas das equações do método DAEE (vazão média plurianual, Q95%, curva de permanência, Q7,10, Q7,T, Qmin, duração crítica e volume de regularização)."
+    },
+    {
+      "name": "Camadas Base e Cadastros",
+      "description": "Consulta às feições oficiais de municípios paulistas, ottobacias, ottotrechos e regiões hidrológicas (RAU e RXYZ)."
+    }
+  ],
+  "paths": {
+    "/api/coords_join/{lat}/{lon}": {
+      "get": {
+        "tags": ["Consulta Espacial e Bacias"],
+        "summary": "Calcula a regionalização hidrológica completa a partir de coordenadas (lat/lon)",
+        "description": "Localiza a ottobacia no Estado de São Paulo que contém o ponto `(lat, lon)`, identifica o ottotrecho principal, aplica opcionalmente o recorte transversal à montante do ponto (`partial_basin=true`) e/ou agrega recursivamente todas as ottobacias à montante até a nascente (`include_upstream=true`) segundo a ottocodificação (`COBACIA` / `COBACIAJUS`). Calcula precipitação média ponderada por área, coeficientes `RAU` e `RXYZ`, vazão média plurianual ($\\overline{Q}$), $Q_{95\\%}$ e $Q_{7,10}$. Possui cache em memória de 15 minutos (`X-Cache: HIT|MISS`) e rate limit de 30 req/min por IP.",
+        "parameters": [
+          {
+            "name": "lat",
+            "in": "path",
+            "required": true,
+            "description": "Latitude em graus decimais (WGS84, entre -90 e 90, dentro do Estado de São Paulo).",
+            "schema": { "type": "number", "example": -23.55 }
+          },
+          {
+            "name": "lon",
+            "in": "path",
+            "required": true,
+            "description": "Longitude em graus decimais (WGS84, entre -180 e 180, dentro do Estado de São Paulo).",
+            "schema": { "type": "number", "example": -46.633309 }
+          },
+          {
+            "name": "partial_basin",
+            "in": "query",
+            "required": false,
+            "description": "Quando `true` (padrão), secciona a ottobacia transversalmente no ponto clicado e calcula apenas a sub-bacia contribuinte à montante. Quando `false` (ou `0`), calcula 100% da ottobacia sem corte transversal.",
+            "schema": { "type": "boolean", "default": true, "example": true }
+          },
+          {
+            "name": "include_upstream",
+            "in": "query",
+            "required": false,
+            "description": "Quando `true` (ou `1`), percorre recursivamente a árvore hidrográfica à montante pela ottocodificação (`COBACIAJUS = COBACIA`) até as cabeceiras e soma todas as ottobacias à montante.",
+            "schema": { "type": "boolean", "default": false, "example": false }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Cálculo regionalizado concluído com sucesso.",
+            "headers": {
+              "X-Cache": {
+                "description": "Indica se o resultado veio do cache em memória (`HIT`) ou foi calculado na requisição (`MISS`).",
+                "schema": { "type": "string", "enum": ["HIT", "MISS"] }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/CoordsJoinResponse" }
+              }
+            }
+          },
+          "400": {
+            "description": "Coordenada inválida ou ponto fora do Estado de São Paulo.",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/ErrorResponse" }
+              }
+            }
+          },
+          "404": {
+            "description": "Nenhuma ottobacia encontrada para as coordenadas informadas.",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/ErrorResponse" }
+              }
+            }
+          },
+          "429": {
+            "description": "Limite de requisições excedido (30 req/min por IP).",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/ErrorResponse" }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/geometry_calculate": {
+      "post": {
+        "tags": ["Consulta Espacial e Bacias"],
+        "summary": "Calcula a regionalização hidrológica a partir de um polígono GeoJSON desenhado",
+        "description": "Recebe uma feição ou geometria GeoJSON (`Polygon` ou `MultiPolygon`, até 5.000 vértices, sem autointerseções e contida no Estado de São Paulo), calcula área, precipitação média ponderada, coeficientes regionais ponderados (`RAU` e `RXYZ`), vazões ($\\overline{Q}$, $Q_{95\\%}$, $Q_{7,10}$) e a lista detalhada de ottobacias oficiais intersectadas pelo polígono.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": ["geometry"],
+                "properties": {
+                  "geometry": {
+                    "description": "Feição ou geometria GeoJSON Polygon/MultiPolygon.",
+                    "$ref": "#/components/schemas/GeoJSONFeatureOrGeometry"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Cálculo espacial do polígono desenhado concluído.",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/GeometryCalculateResponse" }
+              }
+            }
+          },
+          "400": { "description": "Geometria inválida ou fora do Estado de São Paulo." },
+          "422": { "description": "Polígono contém autointerseções ou não cobre regiões válidas." }
+        }
+      }
+    },
+    "/api/regularization_catalog": {
+      "get": {
+        "tags": ["Regularização de Vazão (DAEE Eq. 14 e 15)"],
+        "summary": "Retorna o catálogo oficial de parâmetros regionais para regularização de vazão",
+        "description": "Lista as 21 regiões hidrográficas homogêneas (`A` a `U`) com seus coeficientes `A_MEDIA`, `B_MEDIA`, `A`, `B`, fatores adimensionais $X_T$ para $T \\in \\{10, 15, 20, 25, 50, 100\\}$ anos, percentuais de curva de permanência, constante $K = 2.628.000\\text{ s/mês}$ e os parâmetros do exemplo oficial do DAEE (Rio Buquira — Região H).",
+        "responses": {
+          "200": {
+            "description": "Catálogo de parâmetros de regularização.",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/RegularizationCatalogResponse" }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/regularization_simulation": {
+      "post": {
+        "tags": ["Regularização de Vazão (DAEE Eq. 14 e 15)"],
+        "summary": "Simula de 1 a 12 cenários de regularização de vazão intra-anual (Equações 12 a 15)",
+        "description": "Calcula o volume de armazenamento intra-anual $V_c$ ($\\text{m}^3$ e $\\text{hm}^3$), a duração crítica $d_c$ (meses), a vazão mínima de 1 mês $Q_{1,T}$, a vazão limite para $d_c = 6$ meses ($Q_{F,\\text{máx}(d_c=6)}$) e a série mensal de 1 a 12 meses (Demanda vs. Disponibilidade Natural — Figura 4 do DAEE, 1988) para até 12 cenários.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": { "$ref": "#/components/schemas/RegularizationSimulationRequest" }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Resultados comparativos dos cenários de regularização simulados.",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/RegularizationSimulationResponse" }
+              }
+            }
+          },
+          "400": { "description": "Parâmetros de entrada inválidos." }
+        }
+      }
+    },
+    "/api/isohyet_catalog": {
+      "get": {
+        "tags": ["Simulação e Editor de Isoietas"],
+        "summary": "Lista as camadas de isoietas disponíveis no catálogo",
+        "responses": {
+          "200": {
+            "description": "Lista de camadas do catálogo (`historical-1980`).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "id": { "type": "string", "example": "historical-1980" },
+                      "name": { "type": "string", "example": "Isoietas históricas (pré-1980)" },
+                      "description": { "type": "string" },
+                      "source": { "type": "string", "example": "catalog" },
+                      "editable": { "type": "boolean", "example": true }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/isohyet_catalog/{id}": {
+      "get": {
+        "tags": ["Simulação e Editor de Isoietas"],
+        "summary": "Retorna o FeatureCollection GeoJSON de uma camada de isoietas do catálogo",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string", "example": "historical-1980" }
+          }
+        ],
+        "responses": {
+          "200": { "description": "FeatureCollection GeoJSON da camada de isoietas." },
+          "404": { "description": "Camada não encontrada." }
+        }
+      }
+    },
+    "/api/isohyet_editor_layer": {
+      "post": {
+        "tags": ["Simulação e Editor de Isoietas"],
+        "summary": "Recorta uma camada de isoietas do catálogo para o limite da bacia selecionada",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": ["layerId", "geometry"],
+                "properties": {
+                  "layerId": { "type": "string", "example": "historical-1980" },
+                  "geometry": { "$ref": "#/components/schemas/GeoJSONFeatureOrGeometry" }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": { "description": "FeatureCollection GeoJSON das faixas de precipitação recortadas para a bacia." },
+          "404": { "description": "Camada de isoietas não encontrada." }
+        }
+      }
+    },
+    "/api/isohyet_adjust": {
+      "post": {
+        "tags": ["Simulação e Editor de Isoietas"],
+        "summary": "Aplica uma variação percentual de precipitação apenas dentro de uma região desenhada",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": ["region", "percentage"],
+                "properties": {
+                  "layerId": { "type": "string", "example": "historical-1980" },
+                  "layer": { "type": "object", "description": "FeatureCollection GeoJSON opcional caso já tenha sido editado." },
+                  "region": { "$ref": "#/components/schemas/GeoJSONFeatureOrGeometry" },
+                  "percentage": { "type": "number", "minimum": -99.9, "maximum": 500, "example": 10 }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": { "description": "FeatureCollection GeoJSON com a variação percentual aplicada na sub-região." },
+          "400": { "description": "Percentual ou geometria inválidos." }
+        }
+      }
+    },
+    "/api/isohyet_simulation": {
+      "post": {
+        "tags": ["Simulação e Editor de Isoietas"],
+        "summary": "Executa a simulação comparativa de 1 a 6 cenários de isoietas sobre a bacia",
+        "description": "Mantém constantes a geometria da bacia e os coeficientes `RAU`/`RXYZ` e recalcula precipitação média ponderada, vazão média plurianual, $Q_{95\\%}$ e $Q_{7,10}$ para cada camada de isoietas (suporta payload JSON ou compactado com `Content-Encoding: gzip` até 60 MB descompactado). Cada cenário deve cobrir ao menos 95% da área de referência da bacia.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": ["geometry", "scenarios"],
+                "properties": {
+                  "geometry": { "$ref": "#/components/schemas/GeoJSONFeatureOrGeometry" },
+                  "scenarios": {
+                    "type": "array",
+                    "minItems": 1,
+                    "maxItems": 6,
+                    "items": {
+                      "type": "object",
+                      "required": ["id", "name"],
+                      "properties": {
+                        "id": { "type": "string", "example": "historical-1980" },
+                        "name": { "type": "string", "example": "Isoietas históricas (pré-1980)" },
+                        "layer": { "type": "object", "description": "FeatureCollection GeoJSON para camadas enviadas/editadas pelo usuário." }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": { "description": "Resultados comparativos de vazão por cenário de isoietas." },
+          "400": { "description": "Requisição inválida." },
+          "422": { "description": "Cobertura espacial da camada de isoietas inferior a 95% da bacia." }
+        }
+      }
+    },
+    "/api/calculate_discharge_avg/{coef_a}/{coef_b}/{avg_rainfall}/{area_km2}": {
+      "get": {
+        "tags": ["Cálculos Hidrológicos Diretos"],
+        "summary": "Calcula a vazão média plurianual (Equação 1 do DAEE)",
+        "parameters": [
+          { "name": "coef_a", "in": "path", "required": true, "schema": { "type": "number", "example": -29.47 }, "description": "Parâmetro linear `a` (`A_MEDIA`) da regressão chuva-vazão." },
+          { "name": "coef_b", "in": "path", "required": true, "schema": { "type": "number", "example": 0.0315 }, "schema": { "type": "number", "example": 0.0315 }, "description": "Parâmetro angular `b` (`B_MEDIA`) da regressão chuva-vazão." },
+          { "name": "avg_rainfall", "in": "path", "required": true, "schema": { "type": "number", "example": 1685 }, "description": "Precipitação média anual na bacia (mm/ano)." },
+          { "name": "area_km2", "in": "path", "required": true, "schema": { "type": "number", "example": 401.5 }, "description": "Área de drenagem da bacia (km²)." }
+        ],
+        "responses": {
+          "200": { "description": "Vazão média em L/s e m³/s." }
+        }
+      }
+    },
+    "/api/calculate_q95/{region}/{qls_m3s}/{area_km2}": {
+      "get": {
+        "tags": ["Cálculos Hidrológicos Diretos"],
+        "summary": "Calcula a vazão Q95% para uma região hidrográfica (Equação 18 do DAEE)",
+        "parameters": [
+          { "name": "region", "in": "path", "required": true, "schema": { "type": "string", "example": "h" }, "description": "Código da região hidrográfica (`a` a `u`)." },
+          { "name": "qls_m3s", "in": "path", "required": true, "schema": { "type": "number", "example": 9.48 }, "description": "Vazão média plurianual (m³/s)." },
+          { "name": "area_km2", "in": "path", "required": true, "schema": { "type": "number", "example": 401.5 }, "description": "Área da bacia (km²)." }
+        ],
+        "responses": {
+          "200": { "description": "Vazão Q95% calculada." }
+        }
+      }
+    },
+    "/api/calculate_qper/{region}/{qls_m3s}": {
+      "get": {
+        "tags": ["Cálculos Hidrológicos Diretos"],
+        "summary": "Calcula a curva de permanência completa (5% a 100%) para uma região hidrográfica",
+        "parameters": [
+          { "name": "region", "in": "path", "required": true, "schema": { "type": "string", "example": "h" } },
+          { "name": "qls_m3s", "in": "path", "required": true, "schema": { "type": "number", "example": 9.48 } }
+        ],
+        "responses": {
+          "200": { "description": "Vetor de vazões da curva de permanência." }
+        }
+      }
+    },
+    "/api/calculate_q7_10/{region}/{c}/{val_a}/{val_b}/{qls_m3s}": {
+      "get": {
+        "tags": ["Cálculos Hidrológicos Diretos"],
+        "summary": "Calcula a vazão mínima de 7 dias e 10 anos de retorno (Q7,10 — Equação 22 do DAEE)",
+        "parameters": [
+          { "name": "region", "in": "path", "required": true, "schema": { "type": "string", "example": "h" } },
+          { "name": "c", "in": "path", "required": true, "schema": { "type": "number", "example": 0.85 } },
+          { "name": "val_a", "in": "path", "required": true, "schema": { "type": "number", "example": 0.4951 } },
+          { "name": "val_b", "in": "path", "required": true, "schema": { "type": "number", "example": 0.0279 } },
+          { "name": "qls_m3s", "in": "path", "required": true, "schema": { "type": "number", "example": 9.48 } }
+        ],
+        "responses": {
+          "200": { "description": "Valor de Q7,10 em m³/s." }
+        }
+      }
+    },
+    "/api/calculate_q7/{region}/{c}/{val_a}/{val_b}/{qls_m3s}/{area_km2}": {
+      "get": {
+        "tags": ["Cálculos Hidrológicos Diretos"],
+        "summary": "Calcula Q7,T para os períodos de retorno de 10, 15, 20, 25, 50 e 100 anos",
+        "parameters": [
+          { "name": "region", "in": "path", "required": true, "schema": { "type": "string", "example": "h" } },
+          { "name": "c", "in": "path", "required": true, "schema": { "type": "number", "example": 0.85 } },
+          { "name": "val_a", "in": "path", "required": true, "schema": { "type": "number", "example": 0.4951 } },
+          { "name": "val_b", "in": "path", "required": true, "schema": { "type": "number", "example": 0.0279 } },
+          { "name": "qls_m3s", "in": "path", "required": true, "schema": { "type": "number", "example": 9.48 } },
+          { "name": "area_km2", "in": "path", "required": true, "schema": { "type": "number", "example": 401.5 } }
+        ],
+        "responses": {
+          "200": { "description": "Série de vazões mínimas de 7 dias por período de retorno." }
+        }
+      }
+    },
+    "/api/calculate_minimal_discharge/{region}/{time}/{a}/{b}/{dmonth}/{qls_m3s}": {
+      "get": {
+        "tags": ["Cálculos Hidrológicos Diretos"],
+        "summary": "Calcula a vazão mínima mensal de duração d meses (Equação 12 do DAEE)",
+        "parameters": [
+          { "name": "region", "in": "path", "required": true, "schema": { "type": "string", "example": "h" } },
+          { "name": "time", "in": "path", "required": true, "schema": { "type": "integer", "minimum": 0, "maximum": 5, "example": 0 }, "description": "Índice do período de retorno (0->10a, 1->15a, 2->20a, 3->25a, 4->50a, 5->100a)." },
+          { "name": "a", "in": "path", "required": true, "schema": { "type": "number", "example": 0.4951 } },
+          { "name": "b", "in": "path", "required": true, "schema": { "type": "number", "example": 0.0279 } },
+          { "name": "dmonth", "in": "path", "required": true, "schema": { "type": "integer", "minimum": 1, "maximum": 12, "example": 1 } },
+          { "name": "qls_m3s", "in": "path", "required": true, "schema": { "type": "number", "example": 9.48 } }
+        ],
+        "responses": {
+          "200": { "description": "Vazão mínima mensal Qd,T." }
+        }
+      }
+    },
+    "/api/calculate_critical_duration/{qf}/{xt}/{a}/{b}/{qls_m3s}": {
+      "get": {
+        "tags": ["Cálculos Hidrológicos Diretos"],
+        "summary": "Calcula a duração crítica dc em meses informando XT diretamente (Equação 15 do DAEE)",
+        "parameters": [
+          { "name": "qf", "in": "path", "required": true, "schema": { "type": "number", "example": 5.0 } },
+          { "name": "xt", "in": "path", "required": true, "schema": { "type": "number", "example": 0.748 } },
+          { "name": "a", "in": "path", "required": true, "schema": { "type": "number", "example": 0.4951 } },
+          { "name": "b", "in": "path", "required": true, "schema": { "type": "number", "example": 0.0279 } },
+          { "name": "qls_m3s", "in": "path", "required": true, "schema": { "type": "number", "example": 9.48 } }
+        ],
+        "responses": {
+          "200": { "description": "Duração crítica dc em meses." }
+        }
+      }
+    },
+    "/api/calculate_critical_duration/{region}/{time}/{qf}/{a}/{b}/{qls_m3s}": {
+      "get": {
+        "tags": ["Cálculos Hidrológicos Diretos"],
+        "summary": "Calcula a duração crítica dc em meses por região e índice de período de retorno (Equação 15 do DAEE)",
+        "parameters": [
+          { "name": "region", "in": "path", "required": true, "schema": { "type": "string", "example": "h" } },
+          { "name": "time", "in": "path", "required": true, "schema": { "type": "integer", "minimum": 0, "maximum": 5, "example": 0 } },
+          { "name": "qf", "in": "path", "required": true, "schema": { "type": "number", "example": 5.0 } },
+          { "name": "a", "in": "path", "required": true, "schema": { "type": "number", "example": 0.4951 } },
+          { "name": "b", "in": "path", "required": true, "schema": { "type": "number", "example": 0.0279 } },
+          { "name": "qls_m3s", "in": "path", "required": true, "schema": { "type": "number", "example": 9.48 } }
+        ],
+        "responses": {
+          "200": { "description": "Duração crítica dc em meses." }
+        }
+      }
+    },
+    "/api/calculate_volume_regularization/{qf}/{xt}/{a}/{b}/{d}/{qls_m3s}/{k}": {
+      "get": {
+        "tags": ["Cálculos Hidrológicos Diretos"],
+        "summary": "Calcula o volume de regularização V(d) para uma duração d específica (Equação 13 do DAEE)",
+        "parameters": [
+          { "name": "qf", "in": "path", "required": true, "schema": { "type": "number", "example": 5.0 } },
+          { "name": "xt", "in": "path", "required": true, "schema": { "type": "number", "example": 0.748 } },
+          { "name": "a", "in": "path", "required": true, "schema": { "type": "number", "example": 0.4951 } },
+          { "name": "b", "in": "path", "required": true, "schema": { "type": "number", "example": 0.0279 } },
+          { "name": "d", "in": "path", "required": true, "schema": { "type": "number", "example": 3.76 } },
+          { "name": "qls_m3s", "in": "path", "required": true, "schema": { "type": "number", "example": 9.48 } },
+          { "name": "k", "in": "path", "required": true, "schema": { "type": "number", "example": 2628000 } }
+        ],
+        "responses": {
+          "200": { "description": "Volume de regularização calculado." }
+        }
+      }
+    },
+    "/api/calculate_max_volume_regularization/{qf}/{region}/{t}/{a}/{b}/{qls_m3s}/{months}": {
+      "get": {
+        "tags": ["Cálculos Hidrológicos Diretos"],
+        "summary": "Calcula o volume máximo de regularização Vc (Equação 14 do DAEE)",
+        "parameters": [
+          { "name": "qf", "in": "path", "required": true, "schema": { "type": "number", "example": 5.0 } },
+          { "name": "region", "in": "path", "required": true, "schema": { "type": "string", "example": "h" } },
+          { "name": "t", "in": "path", "required": true, "schema": { "type": "integer", "minimum": 0, "maximum": 5, "example": 0 } },
+          { "name": "a", "in": "path", "required": true, "schema": { "type": "number", "example": 0.4951 } },
+          { "name": "b", "in": "path", "required": true, "schema": { "type": "number", "example": 0.0279 } },
+          { "name": "qls_m3s", "in": "path", "required": true, "schema": { "type": "number", "example": 9.48 } },
+          { "name": "months", "in": "path", "required": true, "schema": { "type": "integer", "minimum": 1, "maximum": 12, "example": 1 } }
+        ],
+        "responses": {
+          "200": { "description": "Volume máximo de regularização Vc em m³." }
+        }
+      }
+    },
+    "/api/find_coefs/{lat}/{lon}": {
+      "get": {
+        "tags": ["Camadas Base e Cadastros"],
+        "summary": "Consulta pontual dos coeficientes das regiões RAU e RXYZ por coordenada",
+        "parameters": [
+          { "name": "lat", "in": "path", "required": true, "schema": { "type": "number", "example": -23.55 } },
+          { "name": "lon", "in": "path", "required": true, "schema": { "type": "number", "example": -46.633309 } }
+        ],
+        "responses": {
+          "200": { "description": "Propriedades RAU e RXYZ que contêm o ponto." },
+          "404": { "description": "Ponto fora das regiões mapeadas." }
+        }
+      }
+    },
+    "/api/find_coefs_by_region/{lat}/{lon}": {
+      "get": {
+        "tags": ["Camadas Base e Cadastros"],
+        "summary": "Consulta ottobacia, ottotrecho e coeficientes ponderados por coordenada",
+        "parameters": [
+          { "name": "lat", "in": "path", "required": true, "schema": { "type": "number", "example": -23.55 } },
+          { "name": "lon", "in": "path", "required": true, "schema": { "type": "number", "example": -46.633309 } }
+        ],
+        "responses": {
+          "200": { "description": "Ottobacia, ottotrechos e coeficientes ponderados." }
+        }
+      }
+    },
+    "/api/municipios": {
+      "get": {
+        "tags": ["Camadas Base e Cadastros"],
+        "summary": "Lista todos os municípios do Estado de São Paulo na base cartográfica",
+        "responses": { "200": { "description": "Lista de feições municipais." } }
+      }
+    },
+    "/api/municipios/{cod_ibge}": {
+      "get": {
+        "tags": ["Camadas Base e Cadastros"],
+        "summary": "Consulta a feição GeoJSON de um município pelo código IBGE",
+        "parameters": [
+          { "name": "cod_ibge", "in": "path", "required": true, "schema": { "type": "string", "example": "3550308" } }
+        ],
+        "responses": { "200": { "description": "Feições correspondentes ao código IBGE." } }
+      }
+    },
+    "/api/ottobacias/{cod}": {
+      "get": {
+        "tags": ["Camadas Base e Cadastros"],
+        "summary": "Consulta a feição GeoJSON de uma ottobacia pelo código Pfafstetter (COBACIA)",
+        "parameters": [
+          { "name": "cod", "in": "path", "required": true, "schema": { "type": "string", "example": "8649298" } }
+        ],
+        "responses": { "200": { "description": "Feição GeoJSON da ottobacia." } }
+      }
+    },
+    "/api/ottotrechos/{cod}": {
+      "get": {
+        "tags": ["Camadas Base e Cadastros"],
+        "summary": "Consulta os segmentos de drenagem (ottotrechos) de uma ottobacia pelo código COBACIA",
+        "parameters": [
+          { "name": "cod", "in": "path", "required": true, "schema": { "type": "string", "example": "8649298" } }
+        ],
+        "responses": { "200": { "description": "Lista de feições LineString/MultiLineString do ottotrecho." } }
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "ErrorResponse": {
+        "type": "object",
+        "properties": {
+          "error": { "type": "string", "example": "Invalid parameter: lat" }
+        }
+      },
+      "GeoJSONFeatureOrGeometry": {
+        "type": "object",
+        "description": "Objeto GeoJSON Feature ou Geometry (Polygon ou MultiPolygon).",
+        "example": {
+          "type": "Feature",
+          "properties": {},
+          "geometry": {
+            "type": "Polygon",
+            "coordinates": [
+              [
+                [-46.65, -23.56],
+                [-46.62, -23.56],
+                [-46.62, -23.54],
+                [-46.65, -23.54],
+                [-46.65, -23.56]
+              ]
+            ]
+          }
+        }
+      },
+      "CoordsJoinResponse": {
+        "type": "object",
+        "properties": {
+          "latitude": { "type": "number", "example": -23.55 },
+          "longitude": { "type": "number", "example": -46.633309 },
+          "include_upstream": { "type": "boolean", "example": false },
+          "partial_basin": { "type": "boolean", "example": true },
+          "available_upstream_basins_count": { "type": "integer", "example": 2 },
+          "upstream_basins": { "type": "array", "items": { "type": "object" } },
+          "area_km2": { "type": "number", "example": 18.42 },
+          "full_area_km2": { "type": "number", "example": 24.15 },
+          "area_proportion": { "type": "number", "example": 0.7627 },
+          "ottobacia": { "type": "object" },
+          "ottobacia_full": { "type": "object" },
+          "cross_section": { "type": "object", "nullable": true },
+          "ottotrecho": { "type": "array", "items": { "type": "object" } },
+          "rau": { "type": "object" },
+          "rxyz": { "type": "object" },
+          "isolines": { "type": "object" },
+          "avg_discharge": { "type": "number", "example": 0.45 },
+          "q95": { "type": "number", "example": 0.19 },
+          "q710": { "type": "number", "example": 0.12 }
+        }
+      },
+      "GeometryCalculateResponse": {
+        "type": "object",
+        "properties": {
+          "source": { "type": "string", "example": "drawn-geometry" },
+          "area_km2": { "type": "number", "example": 12.5 },
+          "avg_discharge": { "type": "number", "example": 0.31 },
+          "q95": { "type": "number", "example": 0.14 },
+          "q710": { "type": "number", "example": 0.09 },
+          "intersecting_basins": { "type": "array", "items": { "type": "object" } }
+        }
+      },
+      "RegularizationCatalogResponse": {
+        "type": "object",
+        "properties": {
+          "k_seconds_per_month": { "type": "integer", "example": 2628000 },
+          "return_periods": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "index": { "type": "integer", "example": 0 },
+                "years": { "type": "integer", "example": 10 },
+                "failure_probability_percent": { "type": "number", "example": 10 }
+              }
+            }
+          },
+          "regions": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "region": { "type": "string", "example": "H" },
+                "avg_a": { "type": "number", "example": -29.47 },
+                "avg_b": { "type": "number", "example": 0.0315 },
+                "coef_a": { "type": "number", "example": 0.4951 },
+                "coef_b": { "type": "number", "example": 0.0279 },
+                "xt_by_period": { "type": "object" }
+              }
+            }
+          },
+          "daee_example": { "type": "object" }
+        }
+      },
+      "RegularizationSimulationRequest": {
+        "type": "object",
+        "required": ["base", "scenarios"],
+        "properties": {
+          "base": {
+            "type": "object",
+            "properties": {
+              "region": { "type": "string", "example": "H", "description": "Região hidrográfica A a U (ou omitido caso envie coef_a, coef_b e xt_by_period ponderados da bacia)." },
+              "avg_discharge_m3s": { "type": "number", "example": 9.48, "description": "Vazão média de longo período Q̄ (m³/s)." },
+              "area_km2": { "type": "number", "example": 401.5 },
+              "rainfall_mm": { "type": "number", "example": 1685 }
+            }
+          },
+          "scenarios": {
+            "type": "array",
+            "minItems": 1,
+            "maxItems": 12,
+            "items": {
+              "type": "object",
+              "required": ["qf_m3s"],
+              "properties": {
+                "name": { "type": "string", "example": "Rio Buquira T=10 anos (10%)" },
+                "qf_m3s": { "type": "number", "example": 5.0, "description": "Demanda firme a regularizar QF (m³/s)." },
+                "return_period_years": { "type": "number", "example": 10, "description": "Período de retorno T em anos (T = 100 / y)." },
+                "failure_probability_percent": { "type": "number", "example": 10, "description": "Probabilidade anual de não atendimento y% = (100/T)%." }
+              }
+            }
+          }
+        }
+      },
+      "RegularizationSimulationResponse": {
+        "type": "object",
+        "properties": {
+          "k_seconds_per_month": { "type": "integer", "example": 2628000 },
+          "scenarios": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "id": { "type": "string" },
+                "name": { "type": "string" },
+                "region_label": { "type": "string", "example": "H" },
+                "qf_m3s": { "type": "number", "example": 5.0 },
+                "avg_discharge_m3s": { "type": "number", "example": 9.48 },
+                "return_period_years": { "type": "number", "example": 10 },
+                "failure_probability_percent": { "type": "number", "example": 10 },
+                "xt": { "type": "number", "example": 0.748 },
+                "coef_a": { "type": "number", "example": 0.4951 },
+                "coef_b": { "type": "number", "example": 0.0279 },
+                "q0_t_m3s": { "type": "number", "example": 3.5109 },
+                "q1_t_m3s": { "type": "number", "example": 3.7087 },
+                "qf_max_6m_m3s": { "type": "number", "example": 5.8848 },
+                "critical_duration_months": { "type": "number", "example": 3.7625 },
+                "volume_m3": { "type": "number", "example": 7362520 },
+                "volume_hm3": { "type": "number", "example": 7.3625 },
+                "status": { "type": "string", "enum": ["valid_intra_annual", "run_of_river", "exceeds_6_months", "exceeds_average_flow"] },
+                "status_message": { "type": "string" },
+                "monthly_series": { "type": "array", "items": { "type": "object" } }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}
+

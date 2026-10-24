@@ -156,6 +156,40 @@ const regflow = {
 
         const avg_rain_areas  = this.calculateAvgByWeight(rain_avg_weighted_areas);
         const avg_rain_points = this.calculateAvgByWeight(rain_avg_weighted_points);
+        const xt_by_period = {};
+        return_periods.forEach((period, periodIdx) => {
+            const weightedXt = rau_bands
+                .map(band => {
+                    const reg = String(band.properties && band.properties.region || '').toLowerCase();
+                    const weight = Number(band.properties && band.properties.partial_area);
+                    if (!reg || !Number.isFinite(weight) || weight <= 0) return null;
+                    try { return { value: this.getXTCoef(reg, periodIdx), weight }; } catch (_) { return null; }
+                })
+                .filter(Boolean);
+            xt_by_period[period] = this.calculateAvgByWeight(weightedXt);
+        });
+        const retObj = {
+            rau: {
+                bands: rau_bands,
+                avg_a:  this.calculateAvgByWeight(rau_avg_a_weighted_areas),
+                avg_b:  this.calculateAvgByWeight(rau_avg_b_weighted_areas),
+                xt_10:  this.calculateAvgByWeight(rau_avg_xt10_weigted_areas),
+                xt_by_period: xt_by_period,
+                coef_a: this.calculateAvgByWeight(rau_avg_coef_a_weighted_areas),
+                coef_b: this.calculateAvgByWeight(rau_avg_coef_b_weighted_areas),
+                qp95:   this.calculateAvgByWeight(rau_avg_qp95_weighted_areas)
+            },
+            rxyz: {
+                bands: rxyz_bands,
+                coef_c: this.calculateAvgByWeight(rxyz_avg_weighted_areas)
+            },
+            isolines: {
+                avg_rain_areas: avg_rain_areas,
+                avg_rain_points: avg_rain_points,
+                bands: isobands
+            }
+        };
+        if (retObj) return retObj;
 
         return {
             rau: {
@@ -216,9 +250,44 @@ const regflow = {
                 rain_avg_weighted_points.push({value: avg_rain, weight: pts_tags.features.length});
             }
         });
+        return {avg_areas: this.calculateAvgByWeight(rain_avg_weighted_areas), avg_points: this.calculateAvgByWeight(rain_avg_weighted_points), bands: isobands};
 
         const avg_rain_areas  = this.calculateAvgByWeight(rain_avg_weighted_areas);
         const avg_rain_points = this.calculateAvgByWeight(rain_avg_weighted_points);
+        const xt_by_period = {};
+        return_periods.forEach((period, periodIdx) => {
+            const weightedXt = rau_bands
+                .map(band => {
+                    const reg = String(band.properties && band.properties.region || '').toLowerCase();
+                    const weight = Number(band.properties && band.properties.partial_area);
+                    if (!reg || !Number.isFinite(weight) || weight <= 0) return null;
+                    try { return { value: this.getXTCoef(reg, periodIdx), weight }; } catch (_) { return null; }
+                })
+                .filter(Boolean);
+            xt_by_period[period] = this.calculateAvgByWeight(weightedXt);
+        });
+        const retObj = {
+            rau: {
+                bands: rau_bands,
+                avg_a:  this.calculateAvgByWeight(rau_avg_a_weighted_areas),
+                avg_b:  this.calculateAvgByWeight(rau_avg_b_weighted_areas),
+                xt_10:  this.calculateAvgByWeight(rau_avg_xt10_weigted_areas),
+                xt_by_period: xt_by_period,
+                coef_a: this.calculateAvgByWeight(rau_avg_coef_a_weighted_areas),
+                coef_b: this.calculateAvgByWeight(rau_avg_coef_b_weighted_areas),
+                qp95:   this.calculateAvgByWeight(rau_avg_qp95_weighted_areas)
+            },
+            rxyz: {
+                bands: rxyz_bands,
+                coef_c: this.calculateAvgByWeight(rxyz_avg_weighted_areas)
+            },
+            isolines: {
+                avg_rain_areas: avg_rain_areas,
+                avg_rain_points: avg_rain_points,
+                bands: isobands
+            }
+        };
+        if (retObj) return retObj;
         //Return calculated Weighted By {Point,Area}
         //return (weighted_by == 'points') ? avg_rain_points : avg_rain_areas;
         //let rainfall_avg = (weighted_by == 'points') ? avg_rain_points : avg_rain_areas;
@@ -230,11 +299,176 @@ const regflow = {
      */
     calculateAvgByWeight(values){
         const validValues = (Array.isArray(values) ? values : []).filter(function(item) {
-            return item && Number.isFinite(Number(item.value)) && Number.isFinite(Number(item.weight)) && Number(item.weight) > 0;
+            return item && Number.isFinite(Number(item.value)) && Number(item.weight) > 0 && Number.isFinite(Number(item.weight));
         });
         var total_weight = _.sumBy(validValues, function(o){ return Number(o.weight) });
         if (!Number.isFinite(total_weight) || total_weight <= 0) return null;
         return _.sumBy(validValues, function(item) { return Number(item.value) * Number(item.weight); }) / total_weight;
+    },
+
+    getRegionalParametersCatalog(){
+        const regionLetters = ['a','b','c','d','e','f','g','h','i','j','k','l','m','n','o','p','q','r','s','t','u'];
+        const cByRegion = { a: 0.80, b: 0.80, c: 0.80, d: 0.80, e: 0.80, f: 0.85, g: 0.75, h: 0.85, i: 0.85, j: 0.85, k: 0.75, l: 0.85, m: 0.80, n: 0.80, o: 0.80, p: 0.80, q: 0.85, r: 0.85, s: 0.85, t: 0.80, u: 0.80 };
+        const regions = regionLetters.map(letter => {
+            const rainRel = this.getRelationRainToFlowRate(letter);
+            const ab = this.getMeansABCoef(letter);
+            const xtByPeriod = {};
+            return_periods.forEach((period, idx) => {
+                xtByPeriod[period] = this.getXTCoef(letter, idx);
+            });
+            return {
+                region: letter.toUpperCase(),
+                avg_a: rainRel.param_a,
+                avg_b: rainRel.param_b,
+                coef_a: ab.a,
+                coef_b: ab.b,
+                coef_c: cByRegion[letter],
+                qp95: this.getPermanenceCurvesByRegionFreqIndex(letter, 14),
+                xt_by_period: xtByPeriod
+            };
+        });
+        return {
+            k_seconds_per_month: K,
+            return_periods: return_periods.map((t, index) => ({
+                index,
+                return_period_years: t,
+                failure_probability_percent: Number((100 / t).toFixed(2))
+            })),
+            d_months: [...d_months],
+            regions
+        };
+    },
+
+    resolveXTForReturnPeriod(returnPeriodYears, xtByPeriodMap, regionLetter){
+        const t = Number(returnPeriodYears);
+        if (!Number.isFinite(t) || t <= 1) throw new RangeError('Return period T must be greater than 1 year');
+        const map = {};
+        return_periods.forEach((period, idx) => {
+            if (xtByPeriodMap && Number.isFinite(Number(xtByPeriodMap[period]))) {
+                map[period] = Number(xtByPeriodMap[period]);
+            } else if (regionLetter) {
+                map[period] = this.getXTCoef(regionLetter, idx);
+            }
+        });
+        const exactIdx = return_periods.findIndex(p => Math.abs(p - t) < 1e-6);
+        if (exactIdx !== -1 && Number.isFinite(map[return_periods[exactIdx]])) {
+            return map[return_periods[exactIdx]];
+        }
+        const avail = return_periods.filter(p => Number.isFinite(map[p]));
+        if (!avail.length) throw new RangeError('Unable to resolve XT coefficient for return period');
+        if (t <= avail[0]) return map[avail[0]];
+        if (t >= avail[avail.length - 1]) return map[avail[avail.length - 1]];
+        for (let i = 0; i < avail.length - 1; i++) {
+            const t0 = avail[i], t1 = avail[i + 1];
+            if (t >= t0 && t <= t1) {
+                const u0 = -Math.log(-Math.log(1 - 1 / t0));
+                const u1 = -Math.log(-Math.log(1 - 1 / t1));
+                const u = -Math.log(-Math.log(1 - 1 / t));
+                const ratio = (u - u0) / (u1 - u0);
+                return map[t0] + ratio * (map[t1] - map[t0]);
+            }
+        }
+        return map[avail[0]];
+    },
+
+    /**
+     * Method to calculate complete DAEE Flow Regularization Scenario (Equations 12, 13, 14 and 15)
+     */
+    calculateRegularizationScenario(options = {}){
+        const qf = Number(options.qf_m3s);
+        const avgQ = Number(options.avg_discharge_m3s);
+        const coefA = Number(options.coef_a);
+        const coefB = Number(options.coef_b);
+        const kVal = Number.isFinite(Number(options.k)) && Number(options.k) > 0 ? Number(options.k) : K;
+        const returnPeriodYears = Number.isFinite(Number(options.return_period_years)) && Number(options.return_period_years) > 1
+            ? Number(options.return_period_years)
+            : (Number.isFinite(Number(options.failure_probability_percent)) && Number(options.failure_probability_percent) > 0 && Number(options.failure_probability_percent) < 100
+                ? 100 / Number(options.failure_probability_percent)
+                : NaN);
+
+        if (!Number.isFinite(qf) || qf <= 0) throw new RangeError('Firm demand QF must be greater than zero');
+        if (!Number.isFinite(avgQ) || avgQ <= 0) throw new RangeError('Average long-period discharge Q must be greater than zero');
+        if (!Number.isFinite(coefA) || coefA <= 0 || !Number.isFinite(coefB) || coefB <= 0) throw new RangeError('Regional coefficients A and B must be positive finite numbers');
+        if (!Number.isFinite(returnPeriodYears) || returnPeriodYears <= 1) throw new RangeError('Return period T (or probability y%) is invalid');
+
+        const xt = Number.isFinite(Number(options.xt)) && Number(options.xt) > 0
+            ? Number(options.xt)
+            : this.resolveXTForReturnPeriod(returnPeriodYears, options.xt_by_period, options.region);
+
+        const failureProbabilityPercent = 100 / returnPeriodYears;
+        const q0M3s = xt * coefA * avgQ;
+        const q1M3s = xt * (coefA + coefB * 1) * avgQ;
+        const q6M3s = xt * (coefA + coefB * 6) * avgQ;
+        const maxIntraAnnualQfM3s = Math.min(avgQ, xt * (coefA + 12 * coefB) * avgQ);
+
+        const denomDc = 2 * xt * coefB * avgQ;
+        const denomVc = 4 * xt * coefB * avgQ;
+        const rawDcMonths = (qf - q0M3s) / denomDc;
+        const rawVcM3 = (Math.pow(qf - q0M3s, 2) / denomVc) * kVal;
+
+        let status = 'valid_intra_annual';
+        let statusLabel = 'Regularização intra-anual válida (0 < dc ≤ 6 meses)';
+        let volumeM3 = rawVcM3;
+        let criticalDurationMonths = rawDcMonths;
+
+        if (qf <= q0M3s) {
+            status = 'run_of_river';
+            statusLabel = 'Atendimento a fio d’água (QF ≤ XT·A·Q̄ — sem necessidade de reservatório)';
+            volumeM3 = 0;
+            criticalDurationMonths = 0;
+        } else if (qf >= avgQ) {
+            status = 'exceeds_average_flow';
+            statusLabel = 'Demanda igual ou superior à vazão média plurianual (QF ≥ Q̄)';
+        } else if (rawDcMonths > 6) {
+            status = 'exceeds_six_months';
+            statusLabel = 'Duração crítica acima de 6 meses (dc > 6 meses — extrapola limite intra-anual do DAEE)';
+        }
+
+        const monthlySeries = [];
+        for (let d = 1; d <= 12; d++) {
+            const qdM3s = xt * (coefA + coefB * d) * avgQ;
+            const demandVolM3 = qf * kVal * d;
+            const availableVolM3 = qdM3s * kVal * d;
+            const deficitVolM3 = Math.max(0, (qf - qdM3s) * kVal * d);
+            monthlySeries.push({
+                d_months: d,
+                within_methodology_limit: d <= 6,
+                q_min_m3s: qdM3s,
+                demand_volume_m3: demandVolM3,
+                demand_volume_hm3: demandVolM3 / 1e6,
+                available_volume_m3: availableVolM3,
+                available_volume_hm3: availableVolM3 / 1e6,
+                regularization_volume_m3: deficitVolM3,
+                regularization_volume_hm3: deficitVolM3 / 1e6
+            });
+        }
+
+        return {
+            qf_m3s: qf,
+            qf_ls: qf * 1000,
+            qf_percent_of_avg: (qf / avgQ) * 100,
+            return_period_years: returnPeriodYears,
+            failure_probability_percent: failureProbabilityPercent,
+            success_probability_percent: 100 - failureProbabilityPercent,
+            xt,
+            coef_a: coefA,
+            coef_b: coefB,
+            avg_discharge_m3s: avgQ,
+            k_seconds_per_month: kVal,
+            q0_m3s: q0M3s,
+            q1_t_m3s: q1M3s,
+            q6_t_m3s: q6M3s,
+            max_intra_annual_qf_m3s: maxIntraAnnualQfM3s,
+            volume_m3: volumeM3,
+            volume_hm3: volumeM3 / 1e6,
+            raw_volume_m3: rawVcM3,
+            raw_volume_hm3: rawVcM3 / 1e6,
+            critical_duration_months: criticalDurationMonths,
+            raw_critical_duration_months: rawDcMonths,
+            status,
+            status_label: statusLabel,
+            monthly_series: monthlySeries
+        };
     },
 
     /**
