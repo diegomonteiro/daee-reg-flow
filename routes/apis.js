@@ -21,6 +21,35 @@ const coordinateCache = new Map();
 const coordinateRequests = new Map();
 const CACHE_TTL_MS = 15 * 60 * 1000;
 const ottotrechosByBasin = _.groupBy(ottotrechos_json.features, 'properties.COBACIA');
+const ottobaciasByCode = _.keyBy(ottobacias_json.features, 'properties.COBACIA');
+const upstreamCodesByJusante = {};
+ottotrechos_json.features.forEach(feature => {
+    const code = feature && feature.properties && feature.properties.COBACIA;
+    const jus = feature && feature.properties && feature.properties.COBACIAJUS;
+    if (!code || !jus || String(code).startsWith('_VIRTUAL') || !ottobaciasByCode[code]) return;
+    if (!upstreamCodesByJusante[jus]) upstreamCodesByJusante[jus] = [];
+    if (!upstreamCodesByJusante[jus].includes(code)) upstreamCodesByJusante[jus].push(code);
+});
+
+function collectUpstreamBasinCodes(startCode) {
+    if (!startCode) return [];
+    const visited = new Set([String(startCode)]);
+    const queue = [String(startCode)];
+    const upstreamCodes = [];
+    while (queue.length > 0) {
+        const current = queue.shift();
+        const children = upstreamCodesByJusante[current] || [];
+        for (const child of children) {
+            if (!visited.has(child)) {
+                visited.add(child);
+                upstreamCodes.push(child);
+                queue.push(child);
+            }
+        }
+    }
+    return upstreamCodes;
+}
+
 const basinBounds = ottobacias_json.features.map(feature => ({ feature, bbox: turf.bbox(feature) }));
 const isohyetCatalog = [{ id: 'historical-1980', name: 'Isoietas históricas (pré-1980)', description: 'Camada padrão usada pela regionalização original do DAEE.' }];
 const isohyetLayers = { 'historical-1980': isolines_json };
@@ -72,6 +101,11 @@ function limitCoordinateRequests(req, res, next) {
     const key = req.ip || req.socket.remoteAddress || 'unknown';
     const current = coordinateRequests.get(key);
     if (!current || now - current.startedAt >= 60 * 1000) {
+        if (coordinateRequests.size > 1000) {
+            for (const [entryKey, entry] of coordinateRequests.entries()) {
+                if (now - entry.startedAt >= 60 * 1000) coordinateRequests.delete(entryKey);
+            }
+        }
         coordinateRequests.set(key, { startedAt: now, count: 1 });
         return next();
     }
@@ -89,11 +123,23 @@ function countCoordinates(coordinates) {
     return coordinates.reduce((total, item) => total + countCoordinates(item), 0);
 }
 
-function validateBasinGeometry(input) {
+function validateBasinGeometry(input, options = {}) {
     if (!input || input.type !== 'Feature' || !input.geometry || !['Polygon', 'MultiPolygon'].includes(input.geometry.type)) {
         const error = new Error('A valid Polygon or MultiPolygon GeoJSON feature is required');
         error.status = 400;
         throw error;
+    }
+    if (options.allowOfficialBasin && input.properties && input.properties.COBACIA) {
+        const official = ottobaciasByCode[String(input.properties.COBACIA)];
+        if (official && _.isEqual(input.geometry.coordinates, official.geometry.coordinates)) {
+            return { geometry: official, areaKm2: turf.area(official) / 1000000 };
+        }
+        if (official && (input.properties.is_upstream_subbasin || input.properties.is_upstream_network)) {
+            const areaKm2 = turf.area(input) / 1000000;
+            if (Number.isFinite(areaKm2) && areaKm2 > 0) {
+                return { geometry: input, areaKm2 };
+            }
+        }
     }
     if (countCoordinates(input.geometry.coordinates) > 5000) {
         const error = new Error('The geometry exceeds the limit of 5000 vertices');
@@ -115,7 +161,8 @@ function validateBasinGeometry(input) {
     }
     let isWithinState = true;
     turf.flattenEach(geometry, polygon => {
-        if (!limite_sp_json.features.some(state => turf.booleanWithin(polygon, state))) isWithinState = false;
+        const checkState = state => options.allowPartialStateOverlap ? turf.booleanIntersects(polygon, state) : turf.booleanWithin(polygon, state);
+        if (!limite_sp_json.features.some(checkState)) isWithinState = false;
     });
     if (!isWithinState) {
         const error = new Error('The geometry must be entirely within the State of São Paulo');
@@ -159,12 +206,12 @@ function validateRainfallLayer(input) {
 }
 
 function calculateFlows(regionCoefs, rainfall, areaKm2) {
-    if ([regionCoefs.rau.coef_a, regionCoefs.rau.coef_b, regionCoefs.rxyz.coef_c, rainfall.avg_areas].some(value => !Number.isFinite(value))) {
+    if ([regionCoefs.rau.avg_a, regionCoefs.rau.avg_b, regionCoefs.rau.coef_a, regionCoefs.rau.coef_b, regionCoefs.rxyz.coef_c, rainfall.avg_areas].some(value => !Number.isFinite(value))) {
         const error = new Error('The isohyet layer does not provide valid coverage for the selected basin');
         error.status = 422;
         throw error;
     }
-    const averageDischarge = regflow.calculateAvgFlowRateLongPeriod(regionCoefs.rau.coef_a, regionCoefs.rau.coef_b, rainfall.avg_areas, areaKm2);
+    const averageDischarge = regflow.calculateAvgFlowRateLongPeriod(regionCoefs.rau.avg_a, regionCoefs.rau.avg_b, rainfall.avg_areas, areaKm2);
     const q95Values = [];
     const q710Values = [];
     _.each(regionCoefs.rau.bands, region => {
@@ -184,6 +231,24 @@ function getLineEndpoints(feature) {
     return { first: validLines[0][0], last: validLines[validLines.length - 1][validLines[validLines.length - 1].length - 1] };
 }
 
+function isFirstEndpointUpstreamByTopology(segment, endpoints) {
+    const downstreamBasinCode = segment && segment.properties && segment.properties.COBACIAJUS;
+    const downstreamSegments = downstreamBasinCode ? ottotrechosByBasin[downstreamBasinCode] : null;
+    if (Array.isArray(downstreamSegments) && downstreamSegments.length > 0) {
+        const jusCoords = downstreamSegments[0].geometry && downstreamSegments[0].geometry.coordinates;
+        const jusLineCoords = downstreamSegments[0].geometry.type === 'LineString' ? jusCoords : Array.isArray(jusCoords) ? jusCoords[0] : null;
+        if (Array.isArray(jusLineCoords) && jusLineCoords.length >= 2) {
+            const jusLine = turf.lineString(jusLineCoords);
+            const distFirst = turf.pointToLineDistance(turf.point(endpoints.first), jusLine, { units: 'kilometers' });
+            const distLast = turf.pointToLineDistance(turf.point(endpoints.last), jusLine, { units: 'kilometers' });
+            if (Math.abs(distFirst - distLast) > 1e-6) {
+                return distFirst > distLast;
+            }
+        }
+    }
+    return true;
+}
+
 async function enrichStreamSegments(segments) {
     return Promise.all((segments || []).map(async segment => {
         const endpoints = getLineEndpoints(segment);
@@ -194,21 +259,216 @@ async function enrichStreamSegments(segments) {
         ]);
         const firstMeters = firstElevation && Number.isFinite(firstElevation.max) ? firstElevation.max : null;
         const lastMeters = lastElevation && Number.isFinite(lastElevation.max) ? lastElevation.max : null;
-        let upstream = null, downstream = null;
-        if (firstMeters !== null && lastMeters !== null) {
-            const first = { coordinates: endpoints.first, elevation_m: firstMeters };
-            const last = { coordinates: endpoints.last, elevation_m: lastMeters };
-            upstream = firstMeters >= lastMeters ? first : last;
-            downstream = firstMeters >= lastMeters ? last : first;
-        }
-        return { ...segment, properties: { ...segment.properties, stream_endpoints: { first: { coordinates: endpoints.first, elevation_m: firstMeters }, last: { coordinates: endpoints.last, elevation_m: lastMeters }, upstream, downstream, elevation_source: firstMeters !== null && lastMeters !== null ? 'mapbox-terrain-v2' : null } } };
+        const first = { coordinates: endpoints.first, elevation_m: firstMeters };
+        const last = { coordinates: endpoints.last, elevation_m: lastMeters };
+        const hasElevation = firstMeters !== null && lastMeters !== null;
+        const firstIsUpstream = hasElevation && firstMeters !== lastMeters
+            ? firstMeters > lastMeters
+            : isFirstEndpointUpstreamByTopology(segment, endpoints);
+        const upstream = firstIsUpstream ? first : last;
+        const downstream = firstIsUpstream ? last : first;
+        return { ...segment, properties: { ...segment.properties, stream_endpoints: { first, last, upstream, downstream, elevation_source: hasElevation ? 'mapbox-terrain-v2' : 'topology' } } };
     }));
+}
+
+function streamLengthInPolygon(line, poly, samples = 40) {
+    const totalLen = turf.length(line, { units: 'kilometers' });
+    if (!Number.isFinite(totalLen) || totalLen <= 1e-6) return 0;
+    let inside = 0;
+    for (let i = 0; i <= samples; i++) {
+        const pt = turf.along(line, (totalLen * i) / samples, { units: 'kilometers' });
+        if (turf.booleanPointInPolygon(pt, poly)) inside++;
+    }
+    return (inside / (samples + 1)) * totalLen;
+}
+
+function splitBasinUpstreamByPoint(ottobacia, streamSegments, lat, lon) {
+    const fullAreaKm2 = turf.area(ottobacia) / 1000000;
+    const primarySegment = Array.isArray(streamSegments) && streamSegments[0];
+    if (!primarySegment || !primarySegment.geometry) {
+        return { upstreamBasin: ottobacia, fullAreaKm2, upstreamAreaKm2: fullAreaKm2, areaProportion: 1, crossSection: null };
+    }
+    try {
+        const clickedPt = turf.point([lon, lat]);
+        const rawLines = primarySegment.geometry.type === 'LineString'
+            ? [primarySegment.geometry.coordinates]
+            : primarySegment.geometry.coordinates || [];
+        const validLines = rawLines.filter(line => Array.isArray(line) && line.length >= 2);
+        if (!validLines.length) {
+            return { upstreamBasin: ottobacia, fullAreaKm2, upstreamAreaKm2: fullAreaKm2, areaProportion: 1, crossSection: null };
+        }
+        const endpoints = primarySegment.properties && primarySegment.properties.stream_endpoints;
+        const upstreamCoord = endpoints && endpoints.upstream && endpoints.upstream.coordinates ? endpoints.upstream.coordinates : validLines[0][0];
+        const rawCoords = validLines[0];
+        const firstDistToUp = turf.distance(turf.point(rawCoords[0]), turf.point(upstreamCoord), { units: 'kilometers' });
+        const lastDistToUp = turf.distance(turf.point(rawCoords[rawCoords.length - 1]), turf.point(upstreamCoord), { units: 'kilometers' });
+        const orderedCoords = firstDistToUp <= lastDistToUp ? rawCoords : [...rawCoords].reverse();
+        const streamLine = turf.lineString(orderedCoords);
+        const upstreamPt = turf.point(orderedCoords[0]);
+        const downstreamPt = turf.point(orderedCoords[orderedCoords.length - 1]);
+        const snapped = turf.nearestPointOnLine(streamLine, clickedPt, { units: 'kilometers' });
+        const upDistFromCut = turf.distance(upstreamPt, snapped, { units: 'kilometers' });
+        const downDistFromCut = turf.distance(downstreamPt, snapped, { units: 'kilometers' });
+        if (upDistFromCut <= 0.02 || downDistFromCut <= 0.02) {
+            return { upstreamBasin: ottobacia, fullAreaKm2, upstreamAreaKm2: fullAreaKm2, areaProportion: 1, crossSection: null };
+        }
+        const [sx, sy] = snapped.geometry.coordinates;
+        const cosLat = Math.cos(lat * Math.PI / 180) || 1;
+        const bbox = turf.bbox(ottobacia);
+        const diag = Math.hypot((bbox[2] - bbox[0]) * cosLat, bbox[3] - bbox[1]) * 2 || 1;
+        const border = turf.polygonToLine(ottobacia);
+
+        const totalStreamLen = turf.length(streamLine, { units: 'kilometers' });
+        const snapLoc = Number.isFinite(snapped.properties && snapped.properties.location) ? snapped.properties.location : 0;
+        const windowKm = Math.max(0.4, Math.min(2.0, totalStreamLen * 0.15));
+        const pBefore = turf.along(streamLine, Math.max(0, snapLoc - windowKm), { units: 'kilometers' }).geometry.coordinates;
+        const pAfter = turf.along(streamLine, Math.min(totalStreamLen, snapLoc + windowKm), { units: 'kilometers' }).geometry.coordinates;
+        const tanDx = (pAfter[0] - pBefore[0]) * cosLat;
+        const tanDy = pAfter[1] - pBefore[1];
+        const tanLen = Math.hypot(tanDx, tanDy) || 1;
+        const tanX = tanDx / tanLen;
+        const tanY = tanDy / tanLen;
+        const macroNx = -tanY;
+        const macroNy = tanX;
+
+        const evaluateCandidate = (dirX, dirY) => {
+            const toCoord = s => [lon + (s * dirX) / cosLat, lat + s * dirY];
+            const farLine = turf.lineString([toCoord(-diag), toCoord(diag)]);
+            const streamIntersections = turf.lineIntersect(farLine, streamLine);
+            if (!streamIntersections || !streamIntersections.features || !streamIntersections.features.length) return null;
+            const streamHits = streamIntersections.features.map(f => {
+                const [x, y] = f.geometry.coordinates;
+                return { s: (x - lon) * cosLat * dirX + (y - lat) * dirY, coord: [x, y] };
+            }).sort((a, b) => Math.abs(a.s) - Math.abs(b.s));
+            const streamHit = streamHits[0];
+            const sStream = streamHit.s;
+            const sMinReq = Math.min(0, sStream);
+            const sMaxReq = Math.max(0, sStream);
+
+            const borderIntersections = turf.lineIntersect(farLine, border);
+            const sVals = (borderIntersections && borderIntersections.features || []).map(f => {
+                const [x, y] = f.geometry.coordinates;
+                return { s: (x - lon) * cosLat * dirX + (y - lat) * dirY, coord: [x, y] };
+            }).sort((a, b) => a.s - b.s);
+            if (sVals.length < 2) return null;
+            if (sVals.some(h => h.s > sMinReq + 1e-6 && h.s < sMaxReq - 1e-6)) return null;
+
+            const negIdx = sVals.findLastIndex(h => h.s <= sMinReq + 1e-7);
+            const posIdx = sVals.findIndex((h, idx) => idx > negIdx && h.s >= sMaxReq - 1e-7 && (negIdx === -1 || h.s - sVals[negIdx].s > 1e-5));
+            if (negIdx === -1 || posIdx === -1) return null;
+            const negHit = sVals[negIdx];
+            const posHit = sVals[posIdx];
+            if (!negHit || !posHit || posHit.s - negHit.s <= 1e-6) return null;
+            const midPt = turf.point(toCoord((negHit.s + posHit.s) / 2));
+            if (!turf.booleanPointInPolygon(midPt, ottobacia)) return null;
+
+            const chordKm = turf.distance(turf.point(negHit.coord), turf.point(posHit.coord), { units: 'kilometers' });
+            const chordLine = turf.lineString([negHit.coord, posHit.coord]);
+            const streamCrossings = Math.max(1, turf.lineIntersect(chordLine, streamLine).features.length);
+            return { negHit, posHit, streamCoord: streamHit.coord, sStream, chordKm, streamCrossings, sVals, negIdx, posIdx, toCoord };
+        };
+
+        const rawUx = (lon - sx) * cosLat;
+        const rawUy = lat - sy;
+        const len = Math.hypot(rawUx, rawUy);
+        const candidateDirs = [];
+        if (len > 1e-4) {
+            const dux = rawUx / len;
+            const duy = rawUy / len;
+            const dotTan = Math.abs(dux * tanX + duy * tanY);
+            if (dotTan <= 0.6) candidateDirs.push({ ux: dux, uy: duy, penalty: 0 });
+        }
+        for (const deg of [0, -15, 15, -30, 30]) {
+            const rad = (deg * Math.PI) / 180;
+            const c = Math.cos(rad);
+            const s = Math.sin(rad);
+            candidateDirs.push({
+                ux: macroNx * c - macroNy * s,
+                uy: macroNx * s + macroNy * c,
+                penalty: Math.abs(deg) * 0.02
+            });
+        }
+
+        const validCandidates = candidateDirs
+            .map(dir => {
+                const evaluated = evaluateCandidate(dir.ux, dir.uy);
+                if (!evaluated) return null;
+                const cost = (evaluated.streamCrossings > 1 ? (evaluated.streamCrossings - 1) * 5 : 0) + evaluated.chordKm + dir.penalty;
+                return { ...evaluated, cost };
+            })
+            .filter(Boolean)
+            .sort((a, b) => a.cost - b.cost);
+
+        if (!validCandidates.length) {
+            return { upstreamBasin: ottobacia, fullAreaKm2, upstreamAreaKm2: fullAreaKm2, areaProportion: 1, crossSection: null };
+        }
+
+        const bestCandidate = validCandidates[0];
+        const { negHit, posHit, streamCoord, sStream, sVals, negIdx, posIdx, toCoord } = bestCandidate;
+        const [x0, y0] = streamCoord;
+        const prevHit = negIdx > 0 ? sVals[negIdx - 1] : null;
+        const nextHit = posIdx !== -1 && posIdx < sVals.length - 1 ? sVals[posIdx + 1] : null;
+        const epsNeg = prevHit ? Math.min(0.00005, (negHit.s - prevHit.s) * 0.25) : 0.00005;
+        const epsPos = nextHit ? Math.min(0.00005, (nextHit.s - posHit.s) * 0.25) : 0.00005;
+
+        const sectionCoords = Math.abs(sStream) > 1e-5
+            ? (sStream < 0 ? [negHit.coord, [x0, y0], [lon, lat], posHit.coord] : [negHit.coord, [lon, lat], [x0, y0], posHit.coord])
+            : [negHit.coord, [x0, y0], posHit.coord];
+        const crossSection = {
+            line: turf.lineString(sectionCoords, { COBACIA: ottobacia.properties && ottobacia.properties.COBACIA }),
+            stream_point: [x0, y0],
+            clicked_point: [lon, lat],
+            border_points: [negHit.coord, posHit.coord]
+        };
+
+        const chordExtended = turf.lineString([toCoord(negHit.s - epsNeg), toCoord(posHit.s + epsPos)]);
+        const cutter = turf.buffer(chordExtended, 0.00005, { units: 'kilometers', steps: 4 });
+        const diff = turf.difference(ottobacia, cutter);
+        if (!diff) {
+            return { upstreamBasin: ottobacia, fullAreaKm2, upstreamAreaKm2: fullAreaKm2, areaProportion: 1, crossSection: null };
+        }
+        const cutStreamPt = turf.nearestPointOnLine(streamLine, turf.point([x0, y0]), { units: 'kilometers' });
+        const upstreamLine = turf.lineSlice(upstreamPt, cutStreamPt, streamLine);
+        const downstreamLine = turf.lineSlice(cutStreamPt, downstreamPt, streamLine);
+
+        const pieces = [];
+        turf.flattenEach(diff, poly => {
+            const area = turf.area(poly) / 1000000;
+            if (!Number.isFinite(area) || area <= 1e-6) return;
+            const upLen = streamLengthInPolygon(upstreamLine, poly);
+            const downLen = streamLengthInPolygon(downstreamLine, poly);
+            const hasUpPt = turf.booleanPointInPolygon(upstreamPt, poly);
+            const hasDownPt = turf.booleanPointInPolygon(downstreamPt, poly);
+            if ((upLen <= 1e-4 && !hasUpPt) || downLen > upLen) return;
+            const score = (upLen - downLen) + (hasUpPt ? 1000 : 0) - (hasDownPt ? 1000 : 0);
+            pieces.push({ poly, area, score });
+        });
+        if (!pieces.length) {
+            return { upstreamBasin: ottobacia, fullAreaKm2, upstreamAreaKm2: fullAreaKm2, areaProportion: 1, crossSection: null };
+        }
+        pieces.sort((a, b) => b.score - a.score);
+        const bestPiece = pieces[0];
+        const upstreamAreaKm2 = Math.min(bestPiece.area, fullAreaKm2);
+        const upstreamBasin = turf.multiPolygon(
+            [bestPiece.poly.geometry.coordinates],
+            { ...(ottobacia.properties || {}), is_upstream_subbasin: true }
+        );
+        return {
+            upstreamBasin,
+            fullAreaKm2,
+            upstreamAreaKm2,
+            areaProportion: fullAreaKm2 > 0 ? Math.min(upstreamAreaKm2 / fullAreaKm2, 1) : 1,
+            crossSection
+        };
+    } catch (error) {
+        return { upstreamBasin: ottobacia, fullAreaKm2, upstreamAreaKm2: fullAreaKm2, areaProportion: 1, crossSection: null };
+    }
 }
 
 async function calculateGeometry(geometry, options = {}) {
     const areaKm2 = turf.area(geometry) / 1000000;
-    const regionCoefs = regflow.getRegionsCoeficientsByGeometry(geometry, 1, { units: 'kilometers' }, 'area');
-    const rainfall = regflow.getMeanRainfallByGeometry(geometry, 1, { units: 'kilometers' }, 'area', options.rainfallLayer || isolines_json);
+    const regionCoefs = regflow.getRegionsCoeficientsByGeometry(geometry, 1, { units: 'kilometers' }, 'area', options.rainfallLayer || isolines_json);
+    const rainfall = { avg_areas: regionCoefs.isolines.avg_rain_areas, avg_points: regionCoefs.isolines.avg_rain_points, bands: regionCoefs.isolines.bands };
     const flows = calculateFlows(regionCoefs, rainfall, areaKm2);
 
     const center = turf.centroid(geometry).geometry.coordinates;
@@ -691,10 +951,29 @@ router.post('/isohyet_editor_layer', limitCoordinateRequests, function(req, res,
     try {
         const layer = isohyetLayers[req.body.layerId];
         if (!layer) return res.status(404).json({ error: 'Camada de isoietas não encontrada' });
-        const basin = validateBasinGeometry(req.body.geometry).geometry;
+        const basin = validateBasinGeometry(req.body.geometry, { allowOfficialBasin: true }).geometry;
         const clipped = [];
+        const basinBbox = turf.bbox(basin);
         turf.featureEach(layer, feature => {
-            const intersection = turf.intersect(feature, basin);
+            const fb = turf.bbox(feature);
+            if (!boundsIntersect(basinBbox, fb)) return;
+            let intersection = null;
+            try {
+                intersection = turf.intersect(feature, basin);
+            } catch (_) {
+                const coords = [];
+                turf.flattenEach(basin, poly => {
+                    if (!boundsIntersect(turf.bbox(poly), fb)) return;
+                    try {
+                        const hit = turf.intersect(feature, poly);
+                        if (!hit || !hit.geometry) return;
+                        if (hit.geometry.type === 'Polygon') coords.push(hit.geometry.coordinates);
+                        else if (hit.geometry.type === 'MultiPolygon') coords.push(...hit.geometry.coordinates);
+                    } catch (__) {}
+                });
+                if (coords.length === 1) intersection = turf.polygon(coords[0]);
+                else if (coords.length > 1) intersection = turf.multiPolygon(coords);
+            }
             if (intersection) { intersection.properties = { ...feature.properties }; clipped.push(intersection); }
         });
         res.status(200).json(turf.featureCollection(clipped));
@@ -707,7 +986,7 @@ router.post('/isohyet_adjust', limitCoordinateRequests, function(req, res, next)
         if (!layer) {
             const error = new Error('Camada de isoietas não encontrada'); error.status = 404; throw error;
         }
-        const region = validateBasinGeometry(req.body.region).geometry;
+        const region = validateBasinGeometry(req.body.region, { allowPartialStateOverlap: true }).geometry;
         const percentage = Number(req.body.percentage);
         if (!Number.isFinite(percentage) || percentage <= -100 || percentage > 500) {
             const error = new Error('A variação deve ser maior que -100% e menor ou igual a 500%'); error.status = 400; throw error;
@@ -727,7 +1006,7 @@ router.post('/isohyet_adjust', limitCoordinateRequests, function(req, res, next)
 
 router.post('/isohyet_simulation', limitCoordinateRequests, function(req, res, next) {
     async function run() {
-        const validated = validateBasinGeometry(req.body && req.body.geometry);
+        const validated = validateBasinGeometry(req.body && req.body.geometry, { allowOfficialBasin: true });
         const requested = req.body && req.body.scenarios;
         if (!Array.isArray(requested) || requested.length < 1 || requested.length > 6) {
             const error = new Error('Select between 1 and 6 isohyet scenarios');
@@ -748,10 +1027,12 @@ router.post('/isohyet_simulation', limitCoordinateRequests, function(req, res, n
         });
 
         const regionCoefs = regflow.getRegionsCoeficientsByGeometry(validated.geometry, 1, { units: 'kilometers' }, 'area');
+        const rauCoveredArea = (regionCoefs.rau.bands || []).reduce((sum, band) => sum + Number(band.properties.partial_area || 0), 0);
+        const referenceAreaKm2 = rauCoveredArea > 0 ? Math.min(validated.areaKm2, rauCoveredArea) : validated.areaKm2;
         const results = scenarios.map(scenario => {
             const rainfall = regflow.getMeanRainfallByGeometry(validated.geometry, 1, { units: 'kilometers' }, 'area', scenario.layer);
             const coveredArea = (rainfall.bands || []).reduce((sum, band) => sum + Number(band.properties.partial_area || 0), 0);
-            const coverage = Math.min(coveredArea / validated.areaKm2, 1);
+            const coverage = Math.min(coveredArea / referenceAreaKm2, 1);
             if (!Number.isFinite(coverage) || coverage < 0.95) {
                 const error = new Error(`Isohyet scenario "${scenario.name}" covers less than 95% of the selected basin`);
                 error.status = 422;
@@ -777,7 +1058,7 @@ router.post('/isohyet_simulation', limitCoordinateRequests, function(req, res, n
 
 router.post('/geometry_calculate', limitCoordinateRequests, function(req, res, next) {
     async function run() {
-        const validated = validateBasinGeometry(req.body && req.body.geometry);
+        const validated = validateBasinGeometry(req.body && req.body.geometry, { allowOfficialBasin: true });
         const response = await calculateGeometry(validated.geometry, { source: 'drawn-geometry', includeElevation: false, includeBasinOverlaps: true });
         res.status(200).json(response);
     }
@@ -788,8 +1069,9 @@ router.get('/coords_join/:lat/:lon', limitCoordinateRequests, function(req,res,n
     async function run(){
         var lat = parseFloat(req.params['lat']);
         var lon = parseFloat(req.params['lon']);
+        const includeUpstream = req.query.include_upstream === 'true' || req.query.include_upstream === '1';
 
-        const cacheKey = `${lat.toFixed(5)},${lon.toFixed(5)}`;
+        const cacheKey = `${lat.toFixed(5)},${lon.toFixed(5)},${includeUpstream ? 'up' : 'single'}`;
         const cached = coordinateCache.get(cacheKey);
         if (cached && Date.now() - cached.createdAt < CACHE_TTL_MS) {
             res.set('X-Cache', 'HIT');
@@ -844,7 +1126,72 @@ router.get('/coords_join/:lat/:lon', limitCoordinateRequests, function(req,res,n
         });
 
         //Find Ottotrecho por Ottobacia
-        ottotrecho_obj = ottotrechosByBasin[ottobacia_obj.properties.COBACIA] || [];
+        const startBasinCode = String(ottobacia_obj.properties.COBACIA);
+        const upstreamBasinCodes = collectUpstreamBasinCodes(startBasinCode);
+        ottotrecho_obj = await enrichStreamSegments(ottotrechosByBasin[startBasinCode] || []);
+        const splitResult = splitBasinUpstreamByPoint(ottobacia_obj, ottotrecho_obj, lat, lon);
+        let ottobacia_full_obj = ottobacia_obj;
+        ottobacia_obj = splitResult.upstreamBasin;
+        let totalUpstreamAreaKm2 = splitResult.upstreamAreaKm2;
+        let totalFullAreaKm2 = splitResult.fullAreaKm2;
+        const primaryTrechoProps = ottotrecho_obj[0] && ottotrecho_obj[0].properties || {};
+        const upstreamBasinsSummary = [{
+            COBACIA: startBasinCode,
+            COBACIAJUS: primaryTrechoProps.COBACIAJUS || null,
+            COCURSODAG: primaryTrechoProps.COCURSODAG || null,
+            NOCOMPLETO: primaryTrechoProps.NOCOMPLETO || null,
+            area_km2: splitResult.upstreamAreaKm2,
+            full_area_km2: splitResult.fullAreaKm2,
+            area_proportion: splitResult.areaProportion,
+            length_km: (ottotrecho_obj || []).reduce((sum, item) => sum + Number(item.properties && item.properties.NUCOMPTREC || 0), 0),
+            is_clicked_basin: true
+        }];
+
+        if (includeUpstream && upstreamBasinCodes.length > 0) {
+            const combinedCoords = [];
+            const appendCoords = feat => {
+                if (!feat || !feat.geometry) return;
+                if (feat.geometry.type === 'Polygon') combinedCoords.push(feat.geometry.coordinates);
+                else if (feat.geometry.type === 'MultiPolygon') combinedCoords.push(...feat.geometry.coordinates);
+            };
+            appendCoords(splitResult.upstreamBasin);
+            const fullFeatures = [ottobacia_full_obj];
+
+            for (const code of upstreamBasinCodes) {
+                const upBasin = ottobaciasByCode[code];
+                if (!upBasin) continue;
+                const upArea = turf.area(upBasin) / 1000000;
+                if (!Number.isFinite(upArea) || upArea <= 0) continue;
+                appendCoords(upBasin);
+                fullFeatures.push(upBasin);
+                totalUpstreamAreaKm2 += upArea;
+                totalFullAreaKm2 += upArea;
+                const upSegments = ottotrechosByBasin[code] || [];
+                ottotrecho_obj.push(...upSegments);
+                const segProps = upSegments[0] && upSegments[0].properties || {};
+                upstreamBasinsSummary.push({
+                    COBACIA: code,
+                    COBACIAJUS: segProps.COBACIAJUS || null,
+                    COCURSODAG: segProps.COCURSODAG || null,
+                    NOCOMPLETO: segProps.NOCOMPLETO || null,
+                    area_km2: upArea,
+                    full_area_km2: upArea,
+                    area_proportion: 1,
+                    length_km: upSegments.reduce((sum, item) => sum + Number(item.properties && item.properties.NUCOMPTREC || 0), 0),
+                    is_clicked_basin: false
+                });
+            }
+
+            ottobacia_obj = turf.multiPolygon(combinedCoords, {
+                ...(ottobacia_full_obj.properties || {}),
+                is_upstream_subbasin: true,
+                is_upstream_network: true,
+                upstream_basin_codes: [startBasinCode, ...upstreamBasinCodes]
+            });
+            ottobacia_full_obj = turf.featureCollection(fullFeatures);
+        }
+
+        const totalAreaProportion = totalFullAreaKm2 > 0 ? Math.min(totalUpstreamAreaKm2 / totalFullAreaKm2, 1) : 1;
 
         var region_coefs = regflow.getRegionsCoeficientsByGeometry(ottobacia_obj, 1, { units: 'kilometers' }, 'area');
         //console.log("Coeficients: ", region_coefs);
@@ -865,17 +1212,17 @@ router.get('/coords_join/:lat/:lon', limitCoordinateRequests, function(req,res,n
         })*/
 
         //Calculate Anual Average Rainfall By Basin Geometry
-        var area_calc     = turf.area(ottobacia_obj)/1000000;
-        var rainfall_calc = regflow.getMeanRainfallByGeometry(ottobacia_obj);
+        var area_calc     = totalUpstreamAreaKm2;
+        var rainfall_calc = { avg_areas: region_coefs.isolines.avg_rain_areas, avg_points: region_coefs.isolines.avg_rain_points, bands: region_coefs.isolines.bands };
         var altitude_calc = await regflow.getElevationByCoords(lat,lon);
 
         debug('Elevation: %o', altitude_calc);
 
-        if ([region_coefs.rau.coef_a, region_coefs.rau.coef_b, region_coefs.rxyz.coef_c, rainfall_calc.avg_areas].some(value => !Number.isFinite(value))) {
+        if ([region_coefs.rau.avg_a, region_coefs.rau.avg_b, region_coefs.rau.coef_a, region_coefs.rau.coef_b, region_coefs.rxyz.coef_c, rainfall_calc.avg_areas].some(value => !Number.isFinite(value))) {
             return res.status(422).json({ error: 'Unable to calculate regional coefficients for this basin' });
         }
 
-        var avg_discharge = regflow.calculateAvgFlowRateLongPeriod(region_coefs.rau.coef_a, region_coefs.rau.coef_b, rainfall_calc.avg_areas, area_calc);
+        var avg_discharge = regflow.calculateAvgFlowRateLongPeriod(region_coefs.rau.avg_a, region_coefs.rau.avg_b, rainfall_calc.avg_areas, area_calc);
 
         var avg_q95s_weight = [];
         var avg_q710_weight = [];
@@ -901,11 +1248,17 @@ router.get('/coords_join/:lat/:lon', limitCoordinateRequests, function(req,res,n
         q710_calc     = regflow.calculateQ7T(rxyz_obj.properties.C, rau_obj.properties.REGIAO, 0, rau_obj.properties.A, rau_obj.properties.B, avg_discharge);
         qmin_calc     = regflow.calculateQmin(rau_obj.properties.REGIAO, 0, rau_obj.properties.A, rau_obj.properties.B, avg_discharge, 1);*/
 
-        ottotrecho_obj = await enrichStreamSegments(ottotrecho_obj);
         var response = {
             latitude: lat,
             longitude: lon,
+            include_upstream: includeUpstream,
+            available_upstream_basins_count: upstreamBasinCodes.length,
+            upstream_basins: upstreamBasinsSummary,
             area_km2: area_calc,
+            full_area_km2: totalFullAreaKm2,
+            area_proportion: totalAreaProportion,
+            ottobacia_full: ottobacia_full_obj,
+            cross_section: splitResult.crossSection,
             altitude: altitude_calc,
             rxyz: region_coefs.rxyz,
             rau: region_coefs.rau,

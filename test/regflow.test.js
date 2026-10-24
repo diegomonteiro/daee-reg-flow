@@ -69,9 +69,10 @@ test('calculates area-weighted rainfall for a polygon smaller than the sampling 
   assert.ok(result.bands[0].properties.partial_area > 0);
 });
 
-test('handles Mapbox elevation success, malformed responses and invalid coordinates', async () => {
+test('handles Mapbox elevation success, API_TOKEN fallback, malformed responses and invalid coordinates', async () => {
   const originalFetch = global.fetch;
   const originalToken = process.env.MAPBOX_TOKEN;
+  const originalApiToken = process.env.API_TOKEN;
   process.env.MAPBOX_TOKEN = 'test token';
   try {
     let requestedUrl;
@@ -81,6 +82,11 @@ test('handles Mapbox elevation success, malformed responses and invalid coordina
     };
     assert.deepEqual(await regflow.getElevationByCoords(-23.5, -46.6), { min: 710, max: 730 });
     assert.match(requestedUrl, /access_token=test%20token/);
+
+    delete process.env.MAPBOX_TOKEN;
+    process.env.API_TOKEN = 'fallback-api-token';
+    assert.deepEqual(await regflow.getElevationByCoords(-23.5, -46.6), { min: 710, max: 730 });
+    assert.match(requestedUrl, /access_token=fallback-api-token/);
 
     global.fetch = async () => ({ ok: false });
     assert.equal(await regflow.getElevationByCoords(-23.5, -46.6), null);
@@ -93,5 +99,7 @@ test('handles Mapbox elevation success, malformed responses and invalid coordina
     global.fetch = originalFetch;
     if (originalToken === undefined) delete process.env.MAPBOX_TOKEN;
     else process.env.MAPBOX_TOKEN = originalToken;
+    if (originalApiToken === undefined) delete process.env.API_TOKEN;
+    else process.env.API_TOKEN = originalApiToken;
   }
 });

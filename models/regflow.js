@@ -1,3 +1,4 @@
+require('dotenv').config();
 var turf    = require('@turf/turf');
 var _       = require('lodash');
 var debug   = require('debug')('daee-reg-flow:regflow');
@@ -15,6 +16,35 @@ const pps = [5,10,15,20,25,30,40,50,60,70,75,80,85,90,95,100];
 //Number seconds of Month
 const K = 2628000;
 
+function boundsOverlap(a, b) {
+    return a[0] <= b[2] && a[2] >= b[0] && a[1] <= b[3] && a[3] >= b[1];
+}
+
+function safeIntersectWithBasin(basinFeature, targetFeature, basinBounds) {
+    const bBounds = basinBounds || turf.bbox(basinFeature);
+    const tBounds = targetFeature._bbox || (targetFeature._bbox = turf.bbox(targetFeature));
+    if (!boundsOverlap(bBounds, tBounds)) return null;
+    try {
+        return turf.intersect(basinFeature, targetFeature);
+    } catch (_) {
+        const coords = [];
+        turf.flattenEach(basinFeature, function(poly) {
+            if (!boundsOverlap(turf.bbox(poly), tBounds)) return;
+            try {
+                const hit = turf.intersect(poly, targetFeature);
+                if (!hit || !hit.geometry) return;
+                if (hit.geometry.type === 'Polygon') coords.push(hit.geometry.coordinates);
+                else if (hit.geometry.type === 'MultiPolygon') coords.push(...hit.geometry.coordinates);
+            } catch (__) {}
+        });
+        if (!coords.length) return null;
+        return coords.length === 1
+            ? turf.polygon(coords[0], _.cloneDeep(basinFeature.properties || {}))
+            : turf.multiPolygon(coords, _.cloneDeep(basinFeature.properties || {}));
+    }
+}
+
+
 const regflow = {
 
     /**
@@ -23,12 +53,13 @@ const regflow = {
      * @param {*} cellGridSize Size off Cellgrid
      * @param {*} optionsGrid Units by distance (meters, kilometers..)
      * @param {*} weighted_by Weighted type (area less eficient, points most eficient)
+     * @param {*} rainfallLayer GeoJSON FeatureCollection with rainfall bands
      * @returns 
      */
     getRegionsCoeficientsByGeometry(basin_border_geo, cellGridSize=1, optionsGrid={units: 'kilometers'}, weighted_by='area', rainfallLayer=isolines_json){
         const bounds = turf.bbox(basin_border_geo.geometry);
         const extent = bounds;
-        const point_grids = turf.pointGrid(extent, cellGridSize, optionsGrid);
+        const point_grids = turf.pointsWithinPolygon(turf.pointGrid(extent, cellGridSize, optionsGrid), basin_border_geo);
 
         //Rau AVG Weighted
         const rau_avg_a_weighted_areas = [];
@@ -50,7 +81,7 @@ const regflow = {
         turf.featureEach(rau_json, function(rauFeature, rauIndex){
             turf.featureEach(basin_border_geo, function(basinFeature, basinIndex){
                     //Get a intersection of BasinPolygon to IsobandPolygon
-                    var rau_band = turf.intersect(basinFeature, rauFeature);
+                    var rau_band = safeIntersectWithBasin(basinFeature, rauFeature, bounds);
 
                     if(rau_band){
                         //console.log("Rau Band Valid: ", rau_band);
@@ -83,7 +114,7 @@ const regflow = {
         turf.featureEach(rxyz_json, function(rxyzFeature, rxyzIndex){
             turf.featureEach(basin_border_geo, function(basinFeature, basinIndex){
                     //Get a intersection of BasinPolygon to IsobandPolygon
-                    var rxyz_band = turf.intersect(basinFeature, rxyzFeature);
+                    var rxyz_band = safeIntersectWithBasin(basinFeature, rxyzFeature, bounds);
 
                     if(rxyz_band){
                         var partial_area = turf.area(rxyz_band.geometry)/1000000;
@@ -100,7 +131,7 @@ const regflow = {
             var pts = turf.pointsWithinPolygon(point_grids, rainFeature);
             turf.featureEach(basin_border_geo, function(basinFeature, basinIndex){
                     //Get a intersection of BasinPolygon to IsobandPolygon
-                    var isoband = turf.intersect(basinFeature, rainFeature);
+                    var isoband = safeIntersectWithBasin(basinFeature, rainFeature, bounds);
                     //console.log("Isoband: ", isoband);
 
                     if(isoband){
@@ -154,13 +185,14 @@ const regflow = {
      * @param {*} cellGridSize Size of Cellgrid
      * @param {*} optionsGrid {units: 'kilometers'}
      * @param {*} weighted_by Weighted options: {area,points}
+     * @param {*} rainfallLayer GeoJSON FeatureCollection with rainfall bands
      * @returns 
      */
     getMeanRainfallByGeometry(basin_border_geo, cellGridSize=1, optionsGrid={units: 'kilometers'}, weighted_by='area', rainfallLayer=isolines_json){
         const bounds = turf.bbox(basin_border_geo.geometry);
 
         const extent = bounds;   
-        const point_grids = turf.pointGrid(extent, cellGridSize, optionsGrid);
+        const point_grids = turf.pointsWithinPolygon(turf.pointGrid(extent, cellGridSize, optionsGrid), basin_border_geo);
 
         let rain_avg_weighted_areas = [];
         let rain_avg_weighted_points = [];
@@ -169,7 +201,7 @@ const regflow = {
         turf.featureEach(rainfallLayer, function(rainFeature, rainIndex){
             var pts = turf.pointsWithinPolygon(point_grids, rainFeature);
             turf.featureEach(basin_border_geo, function(basinFeature, basinIndex){
-                var isoband = turf.intersect(basinFeature, rainFeature);
+                var isoband = safeIntersectWithBasin(basinFeature, rainFeature, bounds);
                 if(isoband){
                     var partial_area = turf.area(isoband.geometry)/1000000;
                     var avg_rain_obj = {rain: rainFeature.properties.ID, partial_area: partial_area};
@@ -258,7 +290,7 @@ const regflow = {
      * @param {*} t 
      * @param {*} val_a,
      * @param {*} val_b,
-     * @param {*} qgs_m3s
+     * @param {*} qls_m3s
      */
     calculateQ7T(coef_c, region, t, val_a, val_b, qls_m3s){
         var xt  = this.getXTCoef(region, t);
@@ -410,7 +442,7 @@ const regflow = {
     /**
      * Method to Get XT Coeficient by Regionalization Table
      * @param {String} regions
-     * @param {Int} time {10,15,20,25,50,100}
+     * @param {Int} time Return period index {0=10, 1=15, 2=20, 3=25, 4=50, 5=100}
      */
     getXTCoef(region, time){
         var regions = {
@@ -539,7 +571,7 @@ const regflow = {
     /**
      * Method to Get Permanence Curves Using Region and Index
      * @param {String} region {a,b,c,d,e,f,g,h,i,j,k,l,m,n,o,p,q,r,s,t,u}
-     * @param {int} freqIndex {p5=0,p10=1,p15=2,p20=3,p25=4,p30=5,p40=6,p50=7,p60=8,p70=9,p80=10,p85=11,p90=12,p95=13,p100=14}
+     * @param {int} freqIndex {p5=0,p10=1,p15=2,p20=3,p25=4,p30=5,p40=6,p50=7,p60=8,p70=9,p75=10,p80=11,p85=12,p90=13,p95=14,p100=15}
      */
     getPermanenceCurvesByRegionFreqIndex(region,freqIndex){
         const index = Number(freqIndex);
@@ -551,7 +583,7 @@ const regflow = {
      * Method to Get Elevation by Mapbox Service
      */
     async getElevationByCoords(lat,lon){
-        var token = process.env.MAPBOX_TOKEN;
+        var token = (process.env.MAPBOX_TOKEN || process.env.API_TOKEN || '').trim();
         const latitude = Number(lat);
         const longitude = Number(lon);
         if (!token || typeof fetch !== 'function' || !Number.isFinite(latitude) || latitude < -90 || latitude > 90 || !Number.isFinite(longitude) || longitude < -180 || longitude > 180) return null;

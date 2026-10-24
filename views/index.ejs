@@ -34,6 +34,11 @@
           <label class="field"><span>Longitude</span><input type="number" id="longitude" min="-180" max="180" step="any" inputmode="decimal" placeholder="-46,633309" required></label>
         </div>
         <p class="field-help">Use graus decimais. Exemplo: −23,550000; −46,633309.</p>
+        <label class="upstream-option" for="include-upstream">
+          <input type="checkbox" id="include-upstream">
+          <span class="upstream-check" aria-hidden="true"></span>
+          <span>Considerar bacias à montante até a nascente (ottocodificação)</span>
+        </label>
         <div class="form-actions">
           <button class="button button-secondary" id="locate-button" type="button"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><circle cx="12" cy="12" r="8"/><path d="M12 2V5M12 19v3M2 12h3M19 12h3"/></svg>Minha localização</button>
           <button class="button button-primary" id="calculate-button" type="submit"><svg class="button-icon" viewBox="0 0 24 24"><path d="M12 3C9 7.2 6 10.6 6 14.5a6 6 0 0 0 12 0C18 10.6 15 7.2 12 3Z"/></svg><span>Calcular vazão</span><span class="spinner" aria-hidden="true"></span></button>
@@ -68,6 +73,7 @@
       <div class="results-loading" id="results-loading" hidden aria-live="polite"><div class="loading-mark"></div><h3>Analisando a bacia</h3><p>Cruzando limites, precipitação e regiões hidrológicas.</p><div class="skeleton-list"><i></i><i></i><i></i><i></i></div></div>
       <div class="results-content" id="results-content" hidden>
         <dl class="parameter-list"><div><dt>Bacia</dt><dd id="result-basin">—</dd></div><div><dt>Área da bacia</dt><dd id="result-area">—</dd></div><div><dt>Curso d’água</dt><dd id="result-watercourse">—</dd></div><div><dt>Extensão do trecho</dt><dd id="result-stream-length">—</dd></div><div><dt>Ponto montante</dt><dd id="result-upstream">—</dd></div><div><dt>Ponto jusante</dt><dd id="result-downstream">—</dd></div><div><dt>Região A/U</dt><dd id="result-rau">—</dd></div><div><dt>Região XYZ</dt><dd id="result-rxyz">—</dd></div></dl>
+        <section class="basin-overlaps" id="upstream-basins-section" hidden aria-labelledby="upstream-basins-title"><div><h3 id="upstream-basins-title">Ottobacias à montante</h3><span id="upstream-basins-count"></span></div><p id="upstream-basins-description">Agregação hidrográfica pela ottocodificação (montante/jusante) até a nascente.</p><ol id="upstream-basins-list"></ol></section>
         <section class="basin-overlaps" id="basin-overlaps" hidden aria-labelledby="basin-overlaps-title"><div><h3 id="basin-overlaps-title">Ottobacias na área desenhada</h3><span id="basin-overlaps-count"></span></div><p>Participação de cada ottobacia na área desenhada e percentual da própria ottobacia coberto pelo desenho.</p><ol id="basin-overlaps-list"></ol></section>
         <details class="coefficients"><summary>Ver coeficientes do cálculo</summary><dl class="parameter-list compact"><div><dt>A Média</dt><dd id="result-avg-a">—</dd></div><div><dt>B Média</dt><dd id="result-avg-b">—</dd></div><div><dt>Coeficiente a</dt><dd id="result-coef-a">—</dd></div><div><dt>Coeficiente b</dt><dd id="result-coef-b">—</dd></div><div><dt>Coeficiente c</dt><dd id="result-coef-c">—</dd></div></dl></details>
         <div class="metric-list">
@@ -110,7 +116,7 @@
   (() => {
     'use strict';
     const byId = id => document.getElementById(id);
-    const form = byId('coordinate-form'), latInput = byId('latitude'), lonInput = byId('longitude');
+    const form = byId('coordinate-form'), latInput = byId('latitude'), lonInput = byId('longitude'), includeUpstreamInput = byId('include-upstream');
     const calculateButton = byId('calculate-button'), locateButton = byId('locate-button'), searchPanel = byId('search-panel');
     const resultsPanel = byId('results-panel'), empty = byId('results-empty'), loading = byId('results-loading'), content = byId('results-content');
     const startDrawingButton = byId('start-drawing'), cancelDrawingButton = byId('cancel-drawing');
@@ -127,12 +133,16 @@
     map.pm.setGlobalOptions({ continueDrawing: false, snappable: true, allowSelfIntersection: false });
     L.control.zoom({ position: 'bottomleft' }).addTo(map); L.control.scale({ metric: true, imperial: false }).addTo(map);
     const layerControl = L.control.layers({ OpenStreetMap: osm, OpenTopoMap: topo, RapidEye: rapideye, Emplasa: emplasa }, {}, { position: 'bottomright' }).addTo(map);
-    const basinLayer = L.geoJSON(null, { style: { color: '#087bbd', weight: 3, fillColor: '#2a9bd4', fillOpacity: .18 } }).addTo(map);
+    const fullBasinLayer = L.geoJSON(null, { style: { color: '#063f4c', weight: 2, opacity: .65, dashArray: '6 5', fillColor: '#087bbd', fillOpacity: .05 }, onEachFeature: (feature, layer) => { if (feature?.properties?.COBACIA) layer.bindTooltip(`Ottobacia ${feature.properties.COBACIA}`, { sticky: true }); } }).addTo(map);
+    const basinLayer = L.geoJSON(null, { style: { color: '#087bbd', weight: 3, fillColor: '#2a9bd4', fillOpacity: .22 } }).addTo(map);
+    const crossSectionLayer = L.layerGroup().addTo(map);
     const basinOverlapColors = ['#7c3aed', '#d97706', '#059669', '#dc2626', '#2563eb', '#9333ea', '#0f766e', '#c2410c'];
     const basinOverlapLayer = L.geoJSON(null, { style: feature => { const color = basinOverlapColors[feature.properties._display_index % basinOverlapColors.length]; return { color, weight: 2.5, fillColor: color, fillOpacity: .3 }; }, onEachFeature: (feature, layer) => layer.bindTooltip(`Ottobacia ${feature.properties.COBACIA} · ${percentage(feature.properties.drawn_area_percent)}% da área desenhada`, { sticky: true }) }).addTo(map);
+    layerControl.addOverlay(fullBasinLayer, 'Ottobacia completa');
+    layerControl.addOverlay(crossSectionLayer, 'Seção transversal (corte)');
     layerControl.addOverlay(basinOverlapLayer, 'Ottobacias intersectadas');
     const rainLayer = L.geoJSON(null, { style: f => ({ color: '#527986', weight: 1, dashArray: '4 4', fillColor: rainColor(f.properties.rain), fillOpacity: .18 }) }).addTo(map);
-    const streamLayer = L.geoJSON(null, { style: { color: '#0759c7', weight: 5, opacity: .9 } }).addTo(map);
+    const streamLayer = L.geoJSON(null, { style: { color: '#0759c7', weight: 5, opacity: .9 }, onEachFeature: (feature, layer) => { const p = feature?.properties || {}; layer.bindTooltip(`${p.NOCOMPLETO || 'Ottotrecho'}${p.COBACIA ? ` · Ottobacia ${p.COBACIA}` : ''}`, { sticky: true }); } }).addTo(map);
     const streamEndpointLayer = L.layerGroup().addTo(map);
     let marker = null, controller = null, isDrawing = false, lastCalculation = null, isIsohyetEditing = false, drawingAdjustmentRegion = false;
     let catalogIsohyets = [], uploadedIsohyets = [], simulationMapLayers = [];
@@ -165,7 +175,8 @@
       const primary = segments[0].properties?.stream_endpoints;
       if (primary?.upstream && primary?.downstream) {
         streamPointMarker(primary.upstream, 'upstream'); streamPointMarker(primary.downstream, 'downstream');
-        text('result-upstream', `${number(primary.upstream.elevation_m, 0)} m`); text('result-downstream', `${number(primary.downstream.elevation_m, 0)} m`);
+        text('result-upstream', Number.isFinite(primary.upstream.elevation_m) ? `${number(primary.upstream.elevation_m, 0)} m` : 'Topologia (sem cota)');
+        text('result-downstream', Number.isFinite(primary.downstream.elevation_m) ? `${number(primary.downstream.elevation_m, 0)} m` : 'Topologia (sem cota)');
       } else {
         streamPointMarker(primary?.first, null, 'Ponto inicial'); streamPointMarker(primary?.last, null, 'Ponto final');
         text('result-upstream', 'Elevação indisponível'); text('result-downstream', 'Elevação indisponível');
@@ -197,16 +208,57 @@
       clearSimulationLayers();
       byId('comparison-results').hidden = true;
       const segment = data.ottotrecho?.[0]?.properties || {}, basin = data.ottobacia.properties || {};
-      text('result-basin', data.source === 'drawn-geometry' ? 'Bacia desenhada' : segment.NOCOMPLETO || segment.COBACIA || basin.COBACIA || 'Bacia sem nome'); text('result-area', `${number(data.area_km2 ?? polygonArea(data.ottobacia))} km²`);
+      const areaValue = data.area_km2 ?? polygonArea(data.ottobacia);
+      const baseBasinName = data.source === 'drawn-geometry' ? 'Bacia desenhada' : segment.NOCOMPLETO || segment.COBACIA || basin.COBACIA || 'Bacia sem nome';
+      const upstreamCount = Array.isArray(data.upstream_basins) ? data.upstream_basins.length : 0;
+      text('result-basin', data.include_upstream && upstreamCount > 1 ? `${baseBasinName} (${upstreamCount} ottobacias)` : baseBasinName);
+      text('result-area', Number.isFinite(data.full_area_km2) && Number.isFinite(data.area_proportion) ? `${number(areaValue)} km² (${percentage(data.area_proportion * 100)}% de ${number(data.full_area_km2)} km²)` : `${number(areaValue)} km²`);
       text('result-rau', [...new Set((data.rau.bands || []).map(i => i.properties.region).filter(Boolean))].join(', ').toUpperCase() || '—'); text('result-rxyz', [...new Set((data.rxyz.bands || []).map(i => i.properties.id).filter(Boolean))].join(', ') || '—');
       [['avg-a',data.rau.avg_a],['avg-b',data.rau.avg_b],['coef-a',data.rau.coef_a],['coef-b',data.rau.coef_b],['coef-c',data.rxyz.coef_c]].forEach(([id,v]) => text(`result-${id}`, number(v,4)));
       text('result-rain', `${number(data.isolines.avg_areas,1)} mm`); text('result-average', `${number(data.avg_discharge)} m³/s`); text('result-q95', `${number(data.q95)} m³/s`); text('result-q710', `${number(data.q710)} m³/s`);
-      basinLayer.clearLayers().addData(data.ottobacia); rainLayer.clearLayers(); (data.isolines.bands || []).forEach(b => rainLayer.addData(b)); renderStreams(data.ottotrecho); renderBasinOverlaps(data); map.fitBounds(basinLayer.getBounds(), { padding: [42,42], maxZoom: 12 });
+      fullBasinLayer.clearLayers(); if (data.ottobacia_full) fullBasinLayer.addData(data.ottobacia_full);
+      basinLayer.clearLayers().addData(data.ottobacia);
+      crossSectionLayer.clearLayers();
+      if (data.cross_section?.line) {
+        L.geoJSON(data.cross_section.line, { style: { color: '#e11d48', weight: 2.5, dashArray: '6 4', opacity: .95 } }).bindTooltip('Seção transversal (limite à montante)', { sticky: true }).addTo(crossSectionLayer);
+        if (Array.isArray(data.cross_section.stream_point)) L.circleMarker([data.cross_section.stream_point[1], data.cross_section.stream_point[0]], { radius: 5, color: '#fff', weight: 2, fillColor: '#e11d48', fillOpacity: 1 }).bindTooltip('Ponto projetado no trecho', { direction: 'top' }).addTo(crossSectionLayer);
+      }
+      rainLayer.clearLayers(); (data.isolines.bands || []).forEach(b => rainLayer.addData(b)); renderStreams(data.ottotrecho); renderBasinOverlaps(data); renderUpstreamBasins(data); map.fitBounds((data.ottobacia_full ? fullBasinLayer : basinLayer).getBounds(), { padding: [42,42], maxZoom: 12 });
       loading.hidden = true; content.hidden = false; empty.hidden = true; openResults();
+    }
+    function renderUpstreamBasins(data) {
+      const section = byId('upstream-basins-section'), list = byId('upstream-basins-list'), desc = byId('upstream-basins-description');
+      list.replaceChildren();
+      if (data.source === 'drawn-geometry') { section.hidden = true; return; }
+      const basins = Array.isArray(data.upstream_basins) ? data.upstream_basins : [];
+      const availableCount = Number(data.available_upstream_basins_count || 0);
+      if (!data.include_upstream) {
+        if (availableCount > 0) {
+          section.hidden = false;
+          text('upstream-basins-count', `+${availableCount} à montante`);
+          desc.textContent = `Existem ${availableCount} ${availableCount === 1 ? 'ottobacia' : 'ottobacias'} à montante até a nascente. Marque a opção na busca para agregá-las ao cálculo.`;
+        } else {
+          section.hidden = true;
+        }
+        return;
+      }
+      section.hidden = false;
+      text('upstream-basins-count', `${basins.length} ${basins.length === 1 ? 'bacia' : 'bacias'}`);
+      desc.textContent = basins.length > 1
+        ? `Agregação hidrográfica pela ottocodificação (${basins.length} ottobacias até a nascente, códigos: ${basins.map(b => b.COBACIA).join(', ')}).`
+        : 'Esta ottobacia já é de cabeceira (não possui outras ottobacias à montante).';
+      basins.forEach((item, index) => {
+        const li = document.createElement('li'), swatch = document.createElement('i'), copy = document.createElement('span'), title = document.createElement('strong'), detail = document.createElement('small');
+        swatch.style.backgroundColor = item.is_clicked_basin ? '#086fc1' : basinOverlapColors[index % basinOverlapColors.length];
+        title.textContent = `Ottobacia ${item.COBACIA}${item.NOCOMPLETO ? ` (${item.NOCOMPLETO})` : ''}${item.is_clicked_basin ? ' — bacia do ponto' : ''}`;
+        detail.textContent = `${number(item.area_km2, 2)} km² (${percentage((item.area_proportion ?? 1) * 100)}% de ${number(item.full_area_km2, 2)} km²)${item.length_km ? ` · trecho ${number(item.length_km, 2)} km` : ''}`;
+        copy.append(title, detail); li.append(swatch, copy); list.appendChild(li);
+      });
     }
     async function calculate(lat, lon) {
       controller?.abort(); controller = new AbortController(); setLoading(true);
-      try { const response = await fetch(`/api/coords_join/${encodeURIComponent(lat)}/${encodeURIComponent(lon)}`, { signal: controller.signal }); const data = await response.json().catch(() => ({})); if (!response.ok) throw new Error(data.error === 'Point outside SP' ? 'O ponto informado está fora do Estado de São Paulo.' : data.error || 'Não foi possível calcular para este ponto.'); render(data); toast('Cálculo realizado com sucesso.'); history.replaceState(null, '', `#${map.getZoom()}/${Number(lat).toFixed(6)}/${Number(lon).toFixed(6)}`); }
+      const query = includeUpstreamInput?.checked ? '?include_upstream=true' : '';
+      try { const response = await fetch(`/api/coords_join/${encodeURIComponent(lat)}/${encodeURIComponent(lon)}${query}`, { signal: controller.signal }); const data = await response.json().catch(() => ({})); if (!response.ok) throw new Error(data.error === 'Point outside SP' ? 'O ponto informado está fora do Estado de São Paulo.' : data.error || 'Não foi possível calcular para este ponto.'); render(data); toast('Cálculo realizado com sucesso.'); history.replaceState(null, '', `#${map.getZoom()}/${Number(lat).toFixed(6)}/${Number(lon).toFixed(6)}`); }
       catch (error) { if (error.name === 'AbortError') return; loading.hidden = true; empty.hidden = false; empty.querySelector('h3').textContent = 'Não foi possível calcular'; empty.querySelector('p').textContent = error.message; toast(error.message, 'error'); }
       finally { calculateButton.disabled = false; locateButton.disabled = false; calculateButton.classList.remove('loading'); }
     }
@@ -219,7 +271,9 @@
       if (value) {
         byId('toast').hidden = true;
         if (marker) { map.removeLayer(marker); marker = null; }
+        fullBasinLayer.clearLayers();
         basinLayer.clearLayers();
+        crossSectionLayer.clearLayers();
         basinOverlapLayer.clearLayers();
         rainLayer.clearLayers();
         streamLayer.clearLayers(); streamEndpointLayer.clearLayers();
@@ -241,12 +295,12 @@
     function isEditableTarget(target) { return target instanceof HTMLElement && (target.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(target.tagName)); }
     function undoLastDrawnVertex() {
       const polygonDraw = map.pm.Draw.Polygon;
-      if (!isDrawing || !polygonDraw?.enabled?.() || typeof polygonDraw._removeLastVertex !== 'function') return false;
+      if ((!isDrawing && !drawingAdjustmentRegion) || !polygonDraw?.enabled?.() || typeof polygonDraw._removeLastVertex !== 'function') return false;
       const points = polygonDraw._layer?.getLatLngs?.() || [];
       if (!points.length) { toast('Ainda não há pontos para desfazer.', 'error'); return true; }
       polygonDraw._removeLastVertex();
       const remaining = polygonDraw._layer?.getLatLngs?.().length || 0;
-      drawingInstructions.innerHTML = `${remaining} ${remaining === 1 ? 'vértice mantido' : 'vértices mantidos'}. <kbd>D</kbd> desfaz o último ponto.`;
+      if (isDrawing) drawingInstructions.innerHTML = `${remaining} ${remaining === 1 ? 'vértice mantido' : 'vértices mantidos'}. <kbd>D</kbd> desfaz o último ponto.`;
       return true;
     }
     async function calculateDrawnGeometry(geometry, sourceLayer) {
@@ -277,11 +331,12 @@
       selectedIsohyetLayer = layer; layer.setStyle(isohyetStyle(layer.feature, true));
       isohyetValue.value = Number(layer.feature.properties.ID); isohyetValue.disabled = false;
       byId('apply-isohyet-value').disabled = false; byId('toggle-isohyet-shape').disabled = false;
+      byId('toggle-isohyet-shape').textContent = layer.pm.enabled() ? 'Concluir forma' : 'Editar forma';
       text('isohyet-editor-status', `Faixa de ${number(layer.feature.properties.ID, 0)} mm selecionada.`);
     }
     function renderIsohyetEditorLayer(data) {
       if (editingIsohyetGroup) map.removeLayer(editingIsohyetGroup);
-      selectedIsohyetLayer = null; isohyetValue.disabled = true; byId('apply-isohyet-value').disabled = true; byId('toggle-isohyet-shape').disabled = true;
+      selectedIsohyetLayer = null; isohyetValue.disabled = true; byId('apply-isohyet-value').disabled = true; byId('toggle-isohyet-shape').disabled = true; byId('toggle-isohyet-shape').textContent = 'Editar forma';
       editingIsohyetGroup = L.geoJSON(data, { style: feature => isohyetStyle(feature), onEachFeature: (_, layer) => layer.on('click', event => { L.DomEvent.stopPropagation(event); selectIsohyetLayer(layer); }) }).addTo(map);
       if (lastCalculation?.ottobacia) map.fitBounds(L.geoJSON(lastCalculation.ottobacia).getBounds(), { padding: [70, 70], maxZoom: 10 });
     }
@@ -317,6 +372,7 @@
     }
     function saveIsohyetEdit() {
       if (!editingIsohyetGroup) return;
+      if (uploadedIsohyets.length >= 5) return toast('O limite é de cinco camadas carregadas.', 'error');
       const layer = editingIsohyetGroup.toGeoJSON(); const name = `${editingIsohyetSource.name} — editada ${uploadedIsohyets.filter(item => item.edited).length + 1}`;
       uploadedIsohyets.push({ id: `edited-${Date.now()}`, name, description: 'Cenário editado visualmente no mapa', source: 'upload', layer, size: new Blob([JSON.stringify(layer)]).size, edited: true });
       closeIsohyetEditor(true); toast('Cenário editado adicionado à simulação.');
@@ -476,7 +532,7 @@
       if (isDrawing) setDrawingMode(false);
       clearSimulationLayers();
       if (marker) { map.removeLayer(marker); marker = null; }
-      basinLayer.clearLayers(); basinOverlapLayer.clearLayers(); rainLayer.clearLayers(); streamLayer.clearLayers(); streamEndpointLayer.clearLayers();
+      fullBasinLayer.clearLayers(); basinLayer.clearLayers(); crossSectionLayer.clearLayers(); basinOverlapLayer.clearLayers(); rainLayer.clearLayers(); streamLayer.clearLayers(); streamEndpointLayer.clearLayers();
       form.reset(); lastCalculation = null; simulationButton.disabled = true;
       loading.hidden = true; content.hidden = true; empty.hidden = false;
       empty.querySelector('h3').textContent = 'Selecione um ponto';
@@ -488,6 +544,15 @@
       setTimeout(() => latInput.focus(), 260);
     }
     form.addEventListener('submit', e => { e.preventDefault(); const lat = Number(String(latInput.value).replace(',','.')), lon = Number(String(lonInput.value).replace(',','.')); if (!Number.isFinite(lat) || lat < -90 || lat > 90 || !Number.isFinite(lon) || lon < -180 || lon > 180) { toast('Informe latitude e longitude válidas em graus decimais.', 'error'); (!Number.isFinite(lat) ? latInput : lonInput).focus(); return; } selectPoint(lat, lon); if (innerWidth < 720) setSearchOpen(false); calculate(lat, lon); });
+    includeUpstreamInput.addEventListener('change', () => {
+      const lat = Number(String(latInput.value).replace(',', '.'));
+      const lon = Number(String(lonInput.value).replace(',', '.'));
+      if (Number.isFinite(lat) && lat >= -90 && lat <= 90 && Number.isFinite(lon) && lon >= -180 && lon <= 180 && String(latInput.value).trim() !== '' && String(lonInput.value).trim() !== '') {
+        calculate(lat, lon);
+      } else if (lastCalculation && lastCalculation.source !== 'drawn-geometry' && Number.isFinite(lastCalculation.latitude) && Number.isFinite(lastCalculation.longitude)) {
+        calculate(lastCalculation.latitude, lastCalculation.longitude);
+      }
+    });
     map.on('click', e => { if (isDrawing || isIsohyetEditing) return; selectPoint(e.latlng.lat, e.latlng.lng); if (innerWidth < 720) setSearchOpen(true); });
     map.on('pm:create', event => {
       if (event.shape !== 'Polygon') return;
@@ -513,11 +578,15 @@
     byId('cancel-isohyet-edit').onclick = () => closeIsohyetEditor(true); byId('save-isohyet-edit').onclick = saveIsohyetEdit;
     startDrawingButton.onclick = () => setDrawingMode(true); cancelDrawingButton.onclick = () => { setDrawingMode(false); toast('Desenho cancelado.'); };
     document.addEventListener('keydown', event => {
-      if (!isDrawing || isEditableTarget(event.target)) return;
+      if ((!isDrawing && !drawingAdjustmentRegion) || isEditableTarget(event.target)) return;
       if (!event.repeat && (event.key.toLowerCase() === 'd' || event.key === 'Backspace')) { if (undoLastDrawnVertex()) event.preventDefault(); }
-      if (event.key === 'Escape') { event.preventDefault(); setDrawingMode(false); toast('Desenho cancelado.'); }
+      if (event.key === 'Escape') {
+        event.preventDefault();
+        if (drawingAdjustmentRegion) { drawingAdjustmentRegion = false; map.pm.disableDraw('Polygon'); map.pm.removeControls(); text('isohyet-editor-status', 'Desenho da região cancelado.'); }
+        else { setDrawingMode(false); toast('Desenho cancelado.'); }
+      }
     });
-    const hash = location.hash.slice(1).split('/'); if (hash.length === 3 && hash.every(v => Number.isFinite(Number(v)))) { const lat = Number(hash[1]), lon = Number(hash[2]); map.setView([lat,lon], Number(hash[0])); selectPoint(lat,lon); }
+    const hash = location.hash.slice(1).split('/'); if (hash.length === 3 && hash.every(v => v.trim() !== '' && Number.isFinite(Number(v)))) { const lat = Number(hash[1]), lon = Number(hash[2]); map.setView([lat,lon], Number(hash[0])); selectPoint(lat,lon); }
   })();
   </script>
 </body>
