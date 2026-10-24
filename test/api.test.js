@@ -32,6 +32,9 @@ test('serves the main map interface with security headers', async () => {
   assert.match(html, /SP-%C3%81guas-Branco\.png/);
   assert.match(html, /SP-ÁGUAS — REG-FLOW/);
   assert.match(html, /function startNewConsultation\(\)/);
+  assert.match(html, /id="start-drawing"/);
+  assert.match(html, /Desenhar bacia/);
+  assert.match(html, /Minha localização/);
   assert.match(html, /Calcular vazão/);
 });
 

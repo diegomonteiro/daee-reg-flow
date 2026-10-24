@@ -10,7 +10,7 @@
   <link rel="preconnect" href="https://tile.openstreetmap.org">
   <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin="anonymous">
   <link rel="stylesheet" href="https://unpkg.com/@geoman-io/leaflet-geoman-free@2.20.0/dist/leaflet-geoman.css">
-  <link rel="stylesheet" href="/stylesheets/style.css">
+  <link rel="stylesheet" href="/stylesheets/style.css?v=20261023b">
 </head>
 <body>
   <header class="app-header">
@@ -40,21 +40,26 @@
           <span>Considerar bacias à montante até a nascente (ottocodificação)</span>
         </label>
         <div class="form-actions">
-          <button class="button button-secondary" id="locate-button" type="button"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><circle cx="12" cy="12" r="8"/><path d="M12 2V5M12 19v3M2 12h3M19 12h3"/></svg>Minha localização</button>
+          <button class="button button-secondary" id="start-drawing" type="button" title="Desenhar uma bacia hidrográfica">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m4 17 5-11 10 4-2 9H7Z"/><circle cx="9" cy="6" r="1.5"/><circle cx="19" cy="10" r="1.5"/><circle cx="17" cy="19" r="1.5"/><circle cx="4" cy="17" r="1.5"/></svg>
+            <span>Desenhar bacia</span>
+          </button>
+          <button class="button button-secondary button-cancel-draw" id="cancel-drawing" type="button" title="Cancelar desenho da bacia" hidden>
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M18 6 6 18M6 6l12 12"/></svg>
+            <span>Cancelar desenho</span>
+          </button>
+          <button class="button button-secondary" id="locate-button" type="button"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><circle cx="12" cy="12" r="8"/><path d="M12 2V5M12 19v3M2 12h3M19 12h3"/></svg><span>Minha localização</span></button>
           <button class="button button-primary" id="calculate-button" type="submit"><svg class="button-icon" viewBox="0 0 24 24"><path d="M12 3C9 7.2 6 10.6 6 14.5a6 6 0 0 0 12 0C18 10.6 15 7.2 12 3Z"/></svg><span>Calcular vazão</span><span class="spinner" aria-hidden="true"></span></button>
         </div>
+        <p class="drawing-status" id="drawing-instructions" role="status" hidden>Adicione os vértices no mapa e clique no primeiro ponto para finalizar. <kbd>D</kbd> desfaz o último ponto.</p>
       </form>
     </section>
 
-    <div class="draw-toolbar" id="draw-toolbar" aria-label="Ferramentas de desenho">
-      <button class="draw-button" id="start-drawing" type="button" title="Desenhar uma bacia">
-        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m4 17 5-11 10 4-2 9H7Z"/><circle cx="9" cy="6" r="1.5"/><circle cx="19" cy="10" r="1.5"/><circle cx="17" cy="19" r="1.5"/><circle cx="4" cy="17" r="1.5"/></svg>
-        <span>Desenhar bacia</span>
-      </button>
-      <button class="draw-button icon-only" id="cancel-drawing" type="button" aria-label="Cancelar desenho" title="Cancelar desenho" hidden>
+    <div class="draw-toolbar" id="draw-toolbar" aria-label="Ferramentas de desenho" hidden>
+      <button class="draw-button" id="cancel-drawing-mobile" type="button" aria-label="Cancelar desenho" title="Cancelar desenho">
         <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M18 6 6 18M6 6l12 12"/></svg>
+        <span>Cancelar desenho</span>
       </button>
-      <p id="drawing-instructions" role="status" hidden>Clique para adicionar vértices. <kbd>D</kbd> desfaz o último ponto.</p>
     </div>
 
     <aside class="isohyet-editor" id="isohyet-editor" hidden aria-labelledby="isohyet-editor-title">
@@ -119,8 +124,16 @@
     const form = byId('coordinate-form'), latInput = byId('latitude'), lonInput = byId('longitude'), includeUpstreamInput = byId('include-upstream');
     const calculateButton = byId('calculate-button'), locateButton = byId('locate-button'), searchPanel = byId('search-panel');
     const resultsPanel = byId('results-panel'), empty = byId('results-empty'), loading = byId('results-loading'), content = byId('results-content');
-    const startDrawingButton = byId('start-drawing'), cancelDrawingButton = byId('cancel-drawing');
+    const drawToolbar = byId('draw-toolbar'), startDrawingButton = byId('start-drawing'), cancelDrawingButton = byId('cancel-drawing');
     const drawingInstructions = byId('drawing-instructions');
+    function syncDrawToolbarPosition() {
+      if (!drawToolbar || !searchPanel) return;
+      if (window.innerWidth < 720) { drawToolbar.style.top = ''; return; }
+      drawToolbar.style.top = `${searchPanel.offsetTop + searchPanel.offsetHeight + 10}px`;
+    }
+    if (typeof ResizeObserver === 'function' && searchPanel) new ResizeObserver(syncDrawToolbarPosition).observe(searchPanel);
+    window.addEventListener('resize', syncDrawToolbarPosition);
+    syncDrawToolbarPosition();
     const simulationDialog = byId('simulation-dialog'), simulationButton = byId('open-simulation'), scenarioList = byId('scenario-list');
     const uploadInput = byId('isohyet-upload'), runSimulationButton = byId('run-simulation'), simulationStatus = byId('simulation-status');
     const isohyetEditor = byId('isohyet-editor'), isohyetValue = byId('isohyet-value'), percentageInput = byId('isohyet-percentage');
@@ -156,7 +169,7 @@
     function toast(message, type = 'success') { text('toast-message', message); byId('toast').className = `toast ${type}`; byId('toast').hidden = false; clearTimeout(toast.timer); toast.timer = setTimeout(() => byId('toast').hidden = true, 5000); }
     function openResults() { resultsPanel.classList.add('open'); resultsPanel.setAttribute('aria-hidden', 'false'); document.body.classList.add('results-open'); setTimeout(() => map.invalidateSize(), 260); }
     function closeResults() { resultsPanel.classList.remove('open'); resultsPanel.setAttribute('aria-hidden', 'true'); document.body.classList.remove('results-open'); setTimeout(() => map.invalidateSize(), 260); }
-    function setLoading(value) { calculateButton.disabled = value; locateButton.disabled = value; calculateButton.classList.toggle('loading', value); empty.hidden = true; content.hidden = true; loading.hidden = !value; if (value) openResults(); }
+    function setLoading(value) { calculateButton.disabled = value; locateButton.disabled = value; startDrawingButton.disabled = value; calculateButton.classList.toggle('loading', value); empty.hidden = true; content.hidden = true; loading.hidden = !value; if (value) openResults(); }
     function selectPoint(lat, lon, center = false) { latInput.value = Number(lat).toFixed(6); lonInput.value = Number(lon).toFixed(6); marker ? marker.setLatLng([lat, lon]) : marker = L.marker([lat, lon], { alt: 'Ponto selecionado' }).addTo(map); if (center) map.setView([lat, lon], Math.max(map.getZoom(), 11)); text('map-hint', 'Ponto selecionado — clique em Calcular vazão'); byId('map-hint').classList.add('selected'); }
     function polygonArea(feature) { const ringArea = ring => Math.abs(ring.reduce((sum, p, i) => { const q = ring[(i + 1) % ring.length]; return sum + (q[0] - p[0]) * Math.PI / 180 * (2 + Math.sin(p[1] * Math.PI / 180) + Math.sin(q[1] * Math.PI / 180)); }, 0) * 6378137 * 6378137 / 2); const g = feature.geometry, polygons = g.type === 'Polygon' ? [g.coordinates] : g.coordinates; return polygons.reduce((sum, p) => sum + ringArea(p[0]) - p.slice(1).reduce((s, r) => s + ringArea(r), 0), 0) / 1e6; }
     function streamPointMarker(point, type, fallbackLabel) {
@@ -260,7 +273,7 @@
       const query = includeUpstreamInput?.checked ? '?include_upstream=true' : '';
       try { const response = await fetch(`/api/coords_join/${encodeURIComponent(lat)}/${encodeURIComponent(lon)}${query}`, { signal: controller.signal }); const data = await response.json().catch(() => ({})); if (!response.ok) throw new Error(data.error === 'Point outside SP' ? 'O ponto informado está fora do Estado de São Paulo.' : data.error || 'Não foi possível calcular para este ponto.'); render(data); toast('Cálculo realizado com sucesso.'); history.replaceState(null, '', `#${map.getZoom()}/${Number(lat).toFixed(6)}/${Number(lon).toFixed(6)}`); }
       catch (error) { if (error.name === 'AbortError') return; loading.hidden = true; empty.hidden = false; empty.querySelector('h3').textContent = 'Não foi possível calcular'; empty.querySelector('p').textContent = error.message; toast(error.message, 'error'); }
-      finally { calculateButton.disabled = false; locateButton.disabled = false; calculateButton.classList.remove('loading'); }
+      finally { calculateButton.disabled = false; locateButton.disabled = false; startDrawingButton.disabled = false; calculateButton.classList.remove('loading'); }
     }
     function setDrawingMode(value) {
       isDrawing = value;
@@ -268,6 +281,12 @@
       startDrawingButton.hidden = value;
       cancelDrawingButton.hidden = !value;
       drawingInstructions.hidden = !value;
+      if (drawToolbar) drawToolbar.hidden = !value;
+      latInput.disabled = value;
+      lonInput.disabled = value;
+      if (includeUpstreamInput) includeUpstreamInput.disabled = value;
+      locateButton.disabled = value;
+      calculateButton.disabled = value;
       if (value) {
         byId('toast').hidden = true;
         if (marker) { map.removeLayer(marker); marker = null; }
@@ -277,7 +296,9 @@
         basinOverlapLayer.clearLayers();
         rainLayer.clearLayers();
         streamLayer.clearLayers(); streamEndpointLayer.clearLayers();
-        drawingInstructions.innerHTML = 'Adicione os vértices e clique no primeiro para finalizar. <kbd>D</kbd> desfaz o último ponto.';
+        drawingInstructions.innerHTML = 'Adicione os vértices no mapa e clique no primeiro ponto para finalizar. <kbd>D</kbd> desfaz o último ponto.';
+        text('map-hint', 'Modo de desenho ativo — clique no mapa para marcar os vértices da bacia');
+        byId('map-hint').classList.add('selected');
         closeResults();
         setSearchOpen(false);
         map.pm.addControls({ position: 'topright' });
@@ -290,7 +311,10 @@
         if (map.pm.globalCutModeEnabled()) map.pm.disableGlobalCutMode();
         if (map.pm.globalRotateModeEnabled()) map.pm.disableGlobalRotateMode();
         map.pm.removeControls();
+        text('map-hint', 'Clique no mapa para escolher um ponto');
+        byId('map-hint').classList.remove('selected');
       }
+      syncDrawToolbarPosition();
     }
     function isEditableTarget(target) { return target instanceof HTMLElement && (target.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(target.tagName)); }
     function undoLastDrawnVertex() {
@@ -322,7 +346,7 @@
         empty.querySelector('h3').textContent = 'Não foi possível calcular'; empty.querySelector('p').textContent = error.message;
         toast(error.message, 'error');
       } finally {
-        calculateButton.disabled = false; locateButton.disabled = false; calculateButton.classList.remove('loading');
+        calculateButton.disabled = false; locateButton.disabled = false; startDrawingButton.disabled = false; calculateButton.classList.remove('loading');
       }
     }
     function isohyetStyle(feature, selected = false) { return { color: selected ? '#e11d48' : rainColor(Number(feature.properties.ID)), weight: selected ? 4 : 2, fillColor: rainColor(Number(feature.properties.ID)), fillOpacity: selected ? .38 : .22 }; }
@@ -576,7 +600,10 @@
       map.pm.enableDraw('Polygon', { snappable: true, allowSelfIntersection: false, pathOptions: { color: '#d97706', weight: 3, fillOpacity: .12 } });
     };
     byId('cancel-isohyet-edit').onclick = () => closeIsohyetEditor(true); byId('save-isohyet-edit').onclick = saveIsohyetEdit;
-    startDrawingButton.onclick = () => setDrawingMode(true); cancelDrawingButton.onclick = () => { setDrawingMode(false); toast('Desenho cancelado.'); };
+    startDrawingButton.onclick = () => setDrawingMode(true);
+    const handleCancelDrawing = () => { setDrawingMode(false); toast('Desenho cancelado.'); };
+    cancelDrawingButton.onclick = handleCancelDrawing;
+    if (byId('cancel-drawing-mobile')) byId('cancel-drawing-mobile').onclick = handleCancelDrawing;
     document.addEventListener('keydown', event => {
       if ((!isDrawing && !drawingAdjustmentRegion) || isEditableTarget(event.target)) return;
       if (!event.repeat && (event.key.toLowerCase() === 'd' || event.key === 'Backspace')) { if (undoLastDrawnVertex()) event.preventDefault(); }
