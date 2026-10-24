@@ -10,7 +10,7 @@
   <link rel="preconnect" href="https://tile.openstreetmap.org">
   <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin="anonymous">
   <link rel="stylesheet" href="https://unpkg.com/@geoman-io/leaflet-geoman-free@2.20.0/dist/leaflet-geoman.css">
-  <link rel="stylesheet" href="/stylesheets/style.css?v=20261023b">
+  <link rel="stylesheet" href="/stylesheets/style.css?v=20261024a">
 </head>
 <body>
   <header class="app-header">
@@ -19,14 +19,23 @@
       <span class="brand-divider" aria-hidden="true"></span><span class="brand-name">REG-FLOW</span><span class="brand-divider brand-divider-secondary" aria-hidden="true"></span>
       <span class="brand-subtitle">Regionalização de vazões</span>
     </a>
-    <button class="header-action" id="open-search" type="button" aria-controls="search-panel"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="m20 20-4-4"/></svg><span>Nova consulta</span></button>
+    <div class="header-actions">
+      <button class="header-action" id="toggle-panels-visibility" type="button" aria-pressed="false" title="Ocultar painéis para visualizar o mapa"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M9 4v16"/></svg><span id="toggle-panels-label">Ocultar painéis</span></button>
+      <button class="header-action" id="open-regularization-header" type="button" aria-controls="regularization-dialog"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 7c2 0 2-2 4-2s2 2 4 2 2-2 4-2 2 2 4 2 2-2 2-2"/><path d="M3 13c2 0 2-2 4-2s2 2 4 2 2-2 4-2 2 2 4 2 2-2 2-2"/><path d="M5 19h14"/></svg><span>Regularização de vazão</span></button>
+      <button class="header-action" id="open-search" type="button" aria-controls="search-panel"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="m20 20-4-4"/></svg><span>Nova consulta</span></button>
+    </div>
   </header>
 
   <main class="workspace">
     <div id="map" aria-label="Mapa interativo do Estado de São Paulo"></div>
-    <section class="search-panel" id="search-panel" aria-labelledby="search-title">
+    <button class="search-restore-button" id="restore-search-panel" type="button" aria-controls="search-panel" aria-expanded="false" title="Mostrar painel Consultar vazão" hidden>
+      <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="m20 20-4-4"/></svg>
+      <span>Consultar vazão</span>
+      <svg class="restore-chevron" viewBox="0 0 24 24" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg>
+    </button>
+    <section class="search-panel open" id="search-panel" aria-labelledby="search-title">
       <div class="panel-heading"><div><h1 id="search-title">Consultar vazão</h1><p>Informe um ponto em São Paulo ou selecione-o no mapa.</p></div>
-        <button class="icon-button search-close" id="close-search" type="button" aria-label="Fechar busca"><svg viewBox="0 0 24 24"><path d="M18 6 6 18M6 6l12 12"/></svg></button>
+        <button class="icon-button search-close" id="close-search" type="button" aria-label="Ocultar painel de consulta" title="Ocultar painel de consulta"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m18 15-6-6-6 6"/></svg></button>
       </div>
       <form id="coordinate-form" novalidate>
         <div class="coordinate-fields">
@@ -34,6 +43,11 @@
           <label class="field"><span>Longitude</span><input type="number" id="longitude" min="-180" max="180" step="any" inputmode="decimal" placeholder="-46,633309" required></label>
         </div>
         <p class="field-help">Use graus decimais. Exemplo: −23,550000; −46,633309.</p>
+        <label class="upstream-option" for="partial-basin">
+          <input type="checkbox" id="partial-basin" checked>
+          <span class="upstream-check" aria-hidden="true"></span>
+          <span>Cálculo parcial da bacia (somente área à montante do ponto; desmarque para ottobacia inteira)</span>
+        </label>
         <label class="upstream-option" for="include-upstream">
           <input type="checkbox" id="include-upstream">
           <span class="upstream-check" aria-hidden="true"></span>
@@ -72,6 +86,10 @@
       <button class="button button-primary editor-save" id="save-isohyet-edit" type="button">Salvar como novo cenário</button>
     </aside>
 
+    <button class="results-edge-toggle" id="toggle-results-sidebar" type="button" aria-controls="results-panel" aria-expanded="false" aria-label="Expandir painel de resultados" title="Expandir painel de resultados">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m15 18-6-6 6-6"/></svg>
+    </button>
+
     <aside class="results-panel" id="results-panel" aria-labelledby="results-title" aria-hidden="true">
       <div class="results-header"><div><p>Consulta regionalizada</p><h2 id="results-title">Resultados</h2></div><button class="icon-button" id="close-results" type="button" aria-label="Fechar resultados"><svg viewBox="0 0 24 24"><path d="M18 6 6 18M6 6l12 12"/></svg></button></div>
       <div class="results-empty" id="results-empty"><div class="empty-icon"><svg viewBox="0 0 24 24"><path d="M12 21s7-5.2 7-12a7 7 0 1 0-14 0c0 6.8 7 12 7 12Z"/><circle cx="12" cy="9" r="2.5"/></svg></div><h3>Selecione um ponto</h3><p>Preencha as coordenadas ou clique no mapa para calcular as vazões da bacia correspondente.</p></div>
@@ -88,6 +106,7 @@
           <article class="metric emphasis"><div class="metric-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><rect x="4" y="5" width="16" height="15" rx="2"/><path d="M8 3v4M16 3v4M4 10h16M8 14h.01M12 14h.01M16 14h.01"/></svg></div><div><span>Vazão Q<sub>7,10</sub></span><strong id="result-q710">—</strong></div></article>
         </div>
         <p class="method-note">Estimativas produzidas pelo método de regionalização. Confirme premissas e limitações antes do uso técnico.</p>
+        <button class="simulation-trigger regularization-trigger" id="open-regularization" type="button"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 7c2 0 2-2 4-2s2 2 4 2 2-2 4-2 2 2 4 2 2-2 2-2"/><path d="M3 13c2 0 2-2 4-2s2 2 4 2 2-2 4-2 2 2 4 2 2-2 2-2"/><path d="M5 19h14"/></svg><span>Simular regularização de vazão</span></button>
         <button class="simulation-trigger" id="open-simulation" type="button" disabled><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 19V9M10 19V5M16 19v-8M22 19H2"/><path d="m3 6 5-3 6 4 7-5"/></svg><span>Simular outras isoietas</span></button>
       </div>
     </aside>
@@ -115,13 +134,230 @@
     </div>
   </dialog>
 
+  <dialog class="simulation-dialog regularization-dialog" id="regularization-dialog" aria-labelledby="regularization-title">
+    <div class="simulation-header">
+      <div>
+        <p>Volume de armazenamento intra-anual · Equações (12) a (15) — DAEE</p>
+        <h2 id="regularization-title">Regularização de vazão e simulação de cenários</h2>
+      </div>
+      <button class="icon-button" id="close-regularization" type="button" aria-label="Fechar regularização de vazão"><svg viewBox="0 0 24 24"><path d="M18 6 6 18M6 6l12 12"/></svg></button>
+    </div>
+    <div class="simulation-body">
+      <div class="reg-formula-banner">
+        <p class="simulation-intro" style="margin:0 0 10px">Calcula o volume de armazenamento intra-anual (<b>V<sub>c</sub></b>) necessário para regularizar uma demanda firme <b>Q<sub>F</sub></b> (m³/s), associado a uma probabilidade <b>y% = (100/T)%</b> de não atendimento em um ano qualquer (período de retorno <b>T</b> em anos), aplicando as <b>Equações (14) e (15)</b> da metodologia oficial do DAEE (1988) para durações críticas de até 6 meses.</p>
+        <div class="reg-equations-grid">
+          <div class="reg-equation-box">
+            <span class="reg-eq-tag">Equação (14) — Volume máximo de regularização</span>
+            <code>V<sub>c</sub> = [ [ Q<sub>F</sub> − (X<sub>T</sub> · A · Q̄) ]² / (4 · X<sub>T</sub> · B · Q̄) ] · K</code>
+            <small>K = 2.628.000 s/mês · Resultado em m³ e hm³ (10⁶ m³)</small>
+          </div>
+          <div class="reg-equation-box">
+            <span class="reg-eq-tag">Equação (15) — Duração crítica da estiagem</span>
+            <code>d<sub>c</sub> = [ Q<sub>F</sub> − (X<sub>T</sub> · A · Q̄) ] / (2 · X<sub>T</sub> · B · Q̄)</code>
+            <small>Válida para regularização intra-anual com 0 &lt; d<sub>c</sub> ≤ 6 meses</small>
+          </div>
+        </div>
+      </div>
+
+      <section class="scenario-picker reg-section" aria-labelledby="reg-base-title">
+        <div class="section-heading">
+          <div>
+            <h3 id="reg-base-title">1. Parâmetros regionais e disponibilidade hídrica (Q̄)</h3>
+            <p>Utilize os parâmetros da bacia calculada no mapa ou selecione uma das 21 regiões hidrográficas homogêneas (A a U).</p>
+          </div>
+          <div class="reg-preset-actions">
+            <button class="upload-button" id="reg-use-map-basin" type="button" hidden><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 21s7-5.2 7-12a7 7 0 1 0-14 0c0 6.8 7 12 7 12Z"/><circle cx="12" cy="9" r="2.5"/></svg>Usar bacia do mapa</button>
+            <button class="upload-button" id="reg-load-daee-example" type="button" title="Exemplo do artigo DAEE (1988): Rio Buquira — Região H, Área 401,5 km², P = 1.685 mm/ano, Q̄ = 9,48 m³/s, QF = 5,0 m³/s, T = 10 anos (10%)"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2Z"/></svg>Carregar exemplo DAEE (Região H)</button>
+          </div>
+        </div>
+
+        <div class="reg-form-grid">
+          <label class="field">
+            <span>Origem dos parâmetros</span>
+            <select id="reg-source-mode" class="reg-select">
+              <option value="map" id="reg-source-map-option">Bacia selecionada no mapa</option>
+              <option value="region" selected>Região hidrográfica DAEE (A–U)</option>
+            </select>
+          </label>
+          <label class="field" id="reg-region-field">
+            <span>Região hidrográfica (Figura 5 — DAEE)</span>
+            <select id="reg-region-select" class="reg-select"></select>
+          </label>
+          <label class="field">
+            <span>Modo de obtenção de Q̄</span>
+            <select id="reg-q-mode" class="reg-select">
+              <option value="calculated" id="reg-q-calculated-option">Usar vazão calculada da bacia (Q̄)</option>
+              <option value="direct" selected>Informar vazão média Q̄ (m³/s) diretamente</option>
+              <option value="rainfall">Calcular Q̄ por Área (km²) e Precipitação P̄ (mm/ano) — Eq. (1)</option>
+            </select>
+          </label>
+          <label class="field" id="reg-q-direct-field">
+            <span id="reg-q-direct-label">Vazão média plurianual Q̄ (m³/s)</span>
+            <input type="number" id="reg-avg-q" min="0.001" step="any" value="9.48">
+          </label>
+          <label class="field" id="reg-area-field" hidden>
+            <span>Área de drenagem (km²)</span>
+            <input type="number" id="reg-area-km2" min="0.01" step="any" value="401.5">
+          </label>
+          <label class="field" id="reg-rain-field" hidden>
+            <span>Precipitação anual média P̄ (mm/ano)</span>
+            <input type="number" id="reg-rainfall-mm" min="100" max="10000" step="any" value="1685">
+          </label>
+        </div>
+
+        <div class="reg-params-summary" id="reg-params-summary" aria-live="polite"></div>
+      </section>
+
+      <section class="scenario-picker reg-section" aria-labelledby="reg-scenarios-title">
+        <div class="section-heading">
+          <div>
+            <h3 id="reg-scenarios-title">2. Cenários de demanda (Q<sub>F</sub>) e probabilidade de não atendimento (y% / T)</h3>
+            <p>Adicione até 12 cenários variando a vazão firme regularizada (x m³/s) e o risco anual de não atendimento (y% = 100/T).</p>
+          </div>
+          <div class="reg-preset-actions">
+            <button class="upload-button" id="reg-add-all-risks" type="button" title="Gera automaticamente 6 cenários para a vazão QF informada com T = 10, 15, 20, 25, 50 e 100 anos">Gerar curva de riscos (T = 10 a 100 anos)</button>
+            <button class="upload-button" id="reg-clear-scenarios" type="button">Limpar lista</button>
+          </div>
+        </div>
+
+        <div class="reg-builder-grid">
+          <label class="field">
+            <span>Vazão a regularizar Q<sub>F</sub> (m³/s)</span>
+            <input type="number" id="reg-qf-input" min="0.001" step="any" value="5.00" placeholder="Ex.: 5,00">
+          </label>
+          <label class="field">
+            <span>Probabilidade de não atendimento y% (Período de retorno T)</span>
+            <select id="reg-return-period" class="reg-select">
+              <option value="10" selected>10,0% ao ano (T = 10 anos)</option>
+              <option value="15">6,67% ao ano (T = 15 anos)</option>
+              <option value="20">5,0% ao ano (T = 20 anos)</option>
+              <option value="25">4,0% ao ano (T = 25 anos)</option>
+              <option value="50">2,0% ao ano (T = 50 anos)</option>
+              <option value="100">1,0% ao ano (T = 100 anos)</option>
+              <option value="custom">Personalizado (informar y% ou T)</option>
+            </select>
+          </label>
+          <label class="field" id="reg-custom-prob-field" hidden>
+            <span>Probabilidade anual y (%)</span>
+            <input type="number" id="reg-custom-prob" min="0.5" max="50" step="any" value="10">
+          </label>
+          <label class="field">
+            <span>Identificação do cenário (opcional)</span>
+            <input type="text" id="reg-scenario-name" maxlength="90" placeholder="Automático conforme QF e T">
+          </label>
+          <div class="reg-builder-button-wrap">
+            <button class="button button-secondary" id="reg-add-scenario" type="button"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg><span>Adicionar cenário</span></button>
+          </div>
+        </div>
+
+        <div class="reg-qf-presets" aria-label="Sugestões rápidas de vazão firme">
+          <span>Sugestões rápidas para Q<sub>F</sub>:</span>
+          <button type="button" class="reg-chip" data-qf-ratio="0.30">30% de Q̄</button>
+          <button type="button" class="reg-chip" data-qf-ratio="0.45">45% de Q̄</button>
+          <button type="button" class="reg-chip" data-qf-ratio="0.5274">Exemplo DAEE (5,00 m³/s)</button>
+          <button type="button" class="reg-chip" data-qf-ratio="0.60">60% de Q̄</button>
+          <button type="button" class="reg-chip" data-qf-ratio="0.70">70% de Q̄</button>
+        </div>
+
+        <div class="scenario-list" id="reg-scenario-list"></div>
+      </section>
+
+      <div class="simulation-actions">
+        <p id="reg-simulation-status" role="status" aria-live="polite"></p>
+        <button class="button button-primary" id="run-reg-simulation" type="button"><span>Calcular e comparar cenários</span><span class="spinner" aria-hidden="true"></span></button>
+      </div>
+
+      <section class="comparison-results" id="reg-results-section" hidden aria-labelledby="reg-results-title">
+        <div class="comparison-heading">
+          <div>
+            <p>Resultados da regularização intra-anual</p>
+            <h3 id="reg-results-title">Volume de armazenamento (V<sub>c</sub>) e duração crítica (d<sub>c</sub>)</h3>
+          </div>
+          <span id="reg-comparison-count"></span>
+        </div>
+
+        <p class="comparison-summary" id="reg-comparison-summary"></p>
+
+        <div class="reg-focus-picker">
+          <label for="reg-focus-scenario">Detalhar memória de cálculo e curva de armazenamento (Figura 4) do cenário:</label>
+          <select id="reg-focus-scenario" class="reg-select"></select>
+        </div>
+
+        <div class="reg-kpi-grid" id="reg-kpi-grid"></div>
+
+        <div class="reg-memory-box" id="reg-formula-memory"></div>
+
+        <div class="comparison-chart" id="reg-comparison-chart" role="img" aria-label="Comparação de volume de regularização e duração crítica entre cenários"></div>
+
+        <div class="reg-figure4-card">
+          <div class="reg-figure4-header">
+            <div>
+              <h4>Curva de Volume Demandado vs. Disponibilidade Natural (Figura 4 — DAEE)</h4>
+              <p id="reg-figure4-subtitle">V=[Q<sub>F</sub> − X<sub>T</sub>·(A + B·d)·Q̄]·K·d ao longo dos meses de estiagem d (1 a 12 meses).</p>
+            </div>
+            <div class="reg-figure4-legend">
+              <span><i style="background:#086fc1"></i>Demanda acumulada (Q<sub>F</sub>·K·d)</span>
+              <span><i style="background:#059669"></i>Disponibilidade natural (Q<sub>d,T</sub>·K·d)</span>
+              <span><i style="background:#e11d48"></i>Déficit máximo V<sub>c</sub> em d<sub>c</sub></span>
+            </div>
+          </div>
+          <div class="reg-figure4-canvas" id="reg-figure4-chart"></div>
+        </div>
+
+        <div class="comparison-table-wrap">
+          <table class="comparison-table">
+            <caption>Comparação dos cenários de regularização de vazão (Equações 12, 14 e 15)</caption>
+            <thead>
+              <tr>
+                <th scope="col">Cenário</th>
+                <th scope="col">Região</th>
+                <th scope="col">Q̄ (m³/s)</th>
+                <th scope="col">Q<sub>F</sub> (m³/s)</th>
+                <th scope="col">Risco y% (T)</th>
+                <th scope="col">X<sub>T</sub></th>
+                <th scope="col">Q<sub>1,T</sub> (m³/s)</th>
+                <th scope="col">d<sub>c</sub> (meses)</th>
+                <th scope="col">Volume V<sub>c</sub> (hm³)</th>
+                <th scope="col">Volume V<sub>c</sub> (m³)</th>
+                <th scope="col">Situação</th>
+              </tr>
+            </thead>
+            <tbody id="reg-comparison-table-body"></tbody>
+          </table>
+        </div>
+
+        <details class="coefficients reg-monthly-details" open>
+          <summary>Tabela de vazões mínimas Q<sub>d,T</sub> (Equação 12) e volumes V(d) (Equação 13) para d = 1 a 6 meses</summary>
+          <div class="comparison-table-wrap" style="margin:10px 14px 14px">
+            <table class="comparison-table">
+              <caption>Vazões mínimas e volumes para durações de 1 a 6 meses consecutivos</caption>
+              <thead>
+                <tr>
+                  <th scope="col">Duração d (meses)</th>
+                  <th scope="col">Vazão mínima Q<sub>d,T</sub> (m³/s)</th>
+                  <th scope="col">Volume demandado Q<sub>F</sub>·K·d (hm³)</th>
+                  <th scope="col">Volume disponível Q<sub>d,T</sub>·K·d (hm³)</th>
+                  <th scope="col">Déficit intra-anual V(d) (hm³)</th>
+                  <th scope="col">Déficit intra-anual V(d) (m³)</th>
+                </tr>
+              </thead>
+              <tbody id="reg-monthly-table-body"></tbody>
+            </table>
+          </div>
+        </details>
+
+        <p class="comparison-note">Nota metodológica (DAEE, 1988): A Equação (14) e a Equação (15) aplicam-se à regularização intra-anual para durações críticas de no máximo 6 meses (0 &lt; d<sub>c</sub> ≤ 6 meses) e Q<sub>F</sub> &lt; Q̄, com K = 2.628.000 s/mês.</p>
+      </section>
+    </div>
+  </dialog>
+
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin="anonymous"></script>
   <script src="https://unpkg.com/@geoman-io/leaflet-geoman-free@2.20.0/dist/leaflet-geoman.min.js"></script>
   <script>
   (() => {
     'use strict';
     const byId = id => document.getElementById(id);
-    const form = byId('coordinate-form'), latInput = byId('latitude'), lonInput = byId('longitude'), includeUpstreamInput = byId('include-upstream');
+    const form = byId('coordinate-form'), latInput = byId('latitude'), lonInput = byId('longitude'), partialBasinInput = byId('partial-basin'), includeUpstreamInput = byId('include-upstream');
     const calculateButton = byId('calculate-button'), locateButton = byId('locate-button'), searchPanel = byId('search-panel');
     const resultsPanel = byId('results-panel'), empty = byId('results-empty'), loading = byId('results-loading'), content = byId('results-content');
     const drawToolbar = byId('draw-toolbar'), startDrawingButton = byId('start-drawing'), cancelDrawingButton = byId('cancel-drawing');
@@ -141,11 +377,14 @@
     const topo = L.tileLayer('https://{s}.tile.opentopomap.org/{z}/{x}/{y}.png', { maxZoom: 17, attribution: '&copy; OpenStreetMap contributors, SRTM | &copy; OpenTopoMap (CC-BY-SA)' });
     const rapideye = L.tileLayer.wms('https://datageo.ambiente.sp.gov.br/geoimage/datageoimg/ows', { layers: 'ESP_IMG_RAPIDEYE_2013_2014', format: 'image/png', attribution: 'DataGEO — RapidEye 2013/2014' });
     const emplasa = L.tileLayer.wms('https://datageo.ambiente.sp.gov.br/geoimage/datageoimg/ORTOFOTOS_EMPLASA_2010/ows', { layers: 'ORTOFOTOS_EMPLASA_2010', format: 'image/png', attribution: 'DataGEO — Emplasa 2010/2011' });
+    const ibge = L.tileLayer.wms('https://datageo.ambiente.sp.gov.br/geoimage/datageoimg/Cartas_50k_IBGE/ows', { layers: 'Cartas_50k_IBGE', format: 'image/png', attribution: 'DataGEO — IBGE 1:50.000' });
+    const igc = L.tileLayer.wms('https://datageo.ambiente.sp.gov.br/geoimage/datageoimg/ows?', { layers: 'ORTOFOTOS_SP_2023_2024', format: 'image/png', attribution: 'DataGEO — IGC 2023/2024' });
+    const declivity = L.tileLayer.wms('https://datageo.ambiente.sp.gov.br/geoimage/datageoimg/ows?', { layers: 'DECLIVIDADE_IPA_2022', format: 'image/png', attribution: 'DataGEO — Declividade 2022' });
     const map = L.map('map', { zoomControl: false, layers: [osm] }).setView([-22.55, -48.65], 7);
     map.pm.setLang('pt_br');
     map.pm.setGlobalOptions({ continueDrawing: false, snappable: true, allowSelfIntersection: false });
     L.control.zoom({ position: 'bottomleft' }).addTo(map); L.control.scale({ metric: true, imperial: false }).addTo(map);
-    const layerControl = L.control.layers({ OpenStreetMap: osm, OpenTopoMap: topo, RapidEye: rapideye, Emplasa: emplasa }, {}, { position: 'bottomright' }).addTo(map);
+    const layerControl = L.control.layers({ OpenStreetMap: osm, OpenTopoMap: topo, RapidEye: rapideye, Emplasa: emplasa, "Cartas IBGE": ibge, "Ortofotos IGC": igc, "Declividade": declivity }, {}, { position: 'bottomright' }).addTo(map);
     const fullBasinLayer = L.geoJSON(null, { style: { color: '#063f4c', weight: 2, opacity: .65, dashArray: '6 5', fillColor: '#087bbd', fillOpacity: .05 }, onEachFeature: (feature, layer) => { if (feature?.properties?.COBACIA) layer.bindTooltip(`Ottobacia ${feature.properties.COBACIA}`, { sticky: true }); } }).addTo(map);
     const basinLayer = L.geoJSON(null, { style: { color: '#087bbd', weight: 3, fillColor: '#2a9bd4', fillOpacity: .22 } }).addTo(map);
     const crossSectionLayer = L.layerGroup().addTo(map);
@@ -167,8 +406,40 @@
     function percentage(v) { v = Number(v); return Number.isFinite(v) && v > 0 && v < .1 ? '< 0,1' : number(v, 1); }
     function text(id, value) { byId(id).textContent = value; }
     function toast(message, type = 'success') { text('toast-message', message); byId('toast').className = `toast ${type}`; byId('toast').hidden = false; clearTimeout(toast.timer); toast.timer = setTimeout(() => byId('toast').hidden = true, 5000); }
-    function openResults() { resultsPanel.classList.add('open'); resultsPanel.setAttribute('aria-hidden', 'false'); document.body.classList.add('results-open'); setTimeout(() => map.invalidateSize(), 260); }
-    function closeResults() { resultsPanel.classList.remove('open'); resultsPanel.setAttribute('aria-hidden', 'true'); document.body.classList.remove('results-open'); setTimeout(() => map.invalidateSize(), 260); }
+    const toggleResultsButton = byId('toggle-results-sidebar'), restoreSearchButton = byId('restore-search-panel');
+    const togglePanelsButton = byId('toggle-panels-visibility'), togglePanelsLabel = byId('toggle-panels-label');
+    function syncResultsToggle(isOpen) {
+      if (!toggleResultsButton) return;
+      toggleResultsButton.setAttribute('aria-expanded', String(isOpen));
+      const label = isOpen ? 'Recolher painel de resultados' : 'Expandir painel de resultados';
+      toggleResultsButton.setAttribute('aria-label', label);
+      toggleResultsButton.title = label;
+    }
+    function updatePanelsVisibilityToggle() {
+      if (!togglePanelsButton) return;
+      const isSearchVisible = !searchPanel.classList.contains('collapsed');
+      const isResultsVisible = resultsPanel.classList.contains('open');
+      const allHidden = !isSearchVisible && !isResultsVisible;
+      togglePanelsButton.setAttribute('aria-pressed', String(allHidden));
+      if (togglePanelsLabel) togglePanelsLabel.textContent = allHidden ? 'Mostrar painéis' : 'Ocultar painéis';
+      togglePanelsButton.title = allHidden ? 'Mostrar painéis sobre o mapa' : 'Ocultar painéis para visualizar o mapa';
+    }
+    function openResults() {
+      resultsPanel.classList.add('open');
+      resultsPanel.setAttribute('aria-hidden', 'false');
+      document.body.classList.add('results-open');
+      syncResultsToggle(true);
+      updatePanelsVisibilityToggle();
+      setTimeout(() => map.invalidateSize(), 260);
+    }
+    function closeResults() {
+      resultsPanel.classList.remove('open');
+      resultsPanel.setAttribute('aria-hidden', 'true');
+      document.body.classList.remove('results-open');
+      syncResultsToggle(false);
+      updatePanelsVisibilityToggle();
+      setTimeout(() => map.invalidateSize(), 260);
+    }
     function setLoading(value) { calculateButton.disabled = value; locateButton.disabled = value; startDrawingButton.disabled = value; calculateButton.classList.toggle('loading', value); empty.hidden = true; content.hidden = true; loading.hidden = !value; if (value) openResults(); }
     function selectPoint(lat, lon, center = false) { latInput.value = Number(lat).toFixed(6); lonInput.value = Number(lon).toFixed(6); marker ? marker.setLatLng([lat, lon]) : marker = L.marker([lat, lon], { alt: 'Ponto selecionado' }).addTo(map); if (center) map.setView([lat, lon], Math.max(map.getZoom(), 11)); text('map-hint', 'Ponto selecionado — clique em Calcular vazão'); byId('map-hint').classList.add('selected'); }
     function polygonArea(feature) { const ringArea = ring => Math.abs(ring.reduce((sum, p, i) => { const q = ring[(i + 1) % ring.length]; return sum + (q[0] - p[0]) * Math.PI / 180 * (2 + Math.sin(p[1] * Math.PI / 180) + Math.sin(q[1] * Math.PI / 180)); }, 0) * 6378137 * 6378137 / 2); const g = feature.geometry, polygons = g.type === 'Polygon' ? [g.coordinates] : g.coordinates; return polygons.reduce((sum, p) => sum + ringArea(p[0]) - p.slice(1).reduce((s, r) => s + ringArea(r), 0), 0) / 1e6; }
@@ -237,6 +508,7 @@
         if (Array.isArray(data.cross_section.stream_point)) L.circleMarker([data.cross_section.stream_point[1], data.cross_section.stream_point[0]], { radius: 5, color: '#fff', weight: 2, fillColor: '#e11d48', fillOpacity: 1 }).bindTooltip('Ponto projetado no trecho', { direction: 'top' }).addTo(crossSectionLayer);
       }
       rainLayer.clearLayers(); (data.isolines.bands || []).forEach(b => rainLayer.addData(b)); renderStreams(data.ottotrecho); renderBasinOverlaps(data); renderUpstreamBasins(data); map.fitBounds((data.ottobacia_full ? fullBasinLayer : basinLayer).getBounds(), { padding: [42,42], maxZoom: 12 });
+      syncMapBasinOptions(data);
       loading.hidden = true; content.hidden = false; empty.hidden = true; openResults();
     }
     function renderUpstreamBasins(data) {
@@ -270,7 +542,10 @@
     }
     async function calculate(lat, lon) {
       controller?.abort(); controller = new AbortController(); setLoading(true);
-      const query = includeUpstreamInput?.checked ? '?include_upstream=true' : '';
+      const params = new URLSearchParams();
+      if (includeUpstreamInput?.checked) params.set('include_upstream', 'true');
+      if (partialBasinInput && !partialBasinInput.checked) params.set('partial_basin', 'false');
+      const query = params.toString() ? `?${params.toString()}` : '';
       try { const response = await fetch(`/api/coords_join/${encodeURIComponent(lat)}/${encodeURIComponent(lon)}${query}`, { signal: controller.signal }); const data = await response.json().catch(() => ({})); if (!response.ok) throw new Error(data.error === 'Point outside SP' ? 'O ponto informado está fora do Estado de São Paulo.' : data.error || 'Não foi possível calcular para este ponto.'); render(data); toast('Cálculo realizado com sucesso.'); history.replaceState(null, '', `#${map.getZoom()}/${Number(lat).toFixed(6)}/${Number(lon).toFixed(6)}`); }
       catch (error) { if (error.name === 'AbortError') return; loading.hidden = true; empty.hidden = false; empty.querySelector('h3').textContent = 'Não foi possível calcular'; empty.querySelector('p').textContent = error.message; toast(error.message, 'error'); }
       finally { calculateButton.disabled = false; locateButton.disabled = false; startDrawingButton.disabled = false; calculateButton.classList.remove('loading'); }
@@ -284,6 +559,7 @@
       if (drawToolbar) drawToolbar.hidden = !value;
       latInput.disabled = value;
       lonInput.disabled = value;
+      if (partialBasinInput) partialBasinInput.disabled = value;
       if (includeUpstreamInput) includeUpstreamInput.disabled = value;
       locateButton.disabled = value;
       calculateButton.disabled = value;
@@ -548,7 +824,30 @@
       }
       renderScenarioList(); simulationDialog.showModal();
     }
-    function setSearchOpen(value) { searchPanel.classList.toggle('open', value); document.body.classList.toggle('search-open', value); byId('open-search').setAttribute('aria-expanded', String(value)); }
+    let wasResultsOpenBeforeHide = false;
+    function setSearchOpen(value) {
+      searchPanel.classList.toggle('open', value);
+      searchPanel.classList.toggle('collapsed', !value);
+      document.body.classList.toggle('search-open', value);
+      byId('open-search').setAttribute('aria-expanded', String(value));
+      if (restoreSearchButton) {
+        restoreSearchButton.hidden = value;
+        restoreSearchButton.setAttribute('aria-expanded', String(value));
+      }
+      updatePanelsVisibilityToggle();
+    }
+    function toggleAllPanelsVisibility() {
+      const isSearchVisible = !searchPanel.classList.contains('collapsed');
+      const isResultsVisible = resultsPanel.classList.contains('open');
+      if (isSearchVisible || isResultsVisible) {
+        wasResultsOpenBeforeHide = isResultsVisible;
+        setSearchOpen(false);
+        closeResults();
+      } else {
+        setSearchOpen(true);
+        if (wasResultsOpenBeforeHide || lastCalculation) openResults();
+      }
+    }
     function startNewConsultation() {
       controller?.abort(); controller = null;
       if (simulationDialog.open) simulationDialog.close();
@@ -568,7 +867,7 @@
       setTimeout(() => latInput.focus(), 260);
     }
     form.addEventListener('submit', e => { e.preventDefault(); const lat = Number(String(latInput.value).replace(',','.')), lon = Number(String(lonInput.value).replace(',','.')); if (!Number.isFinite(lat) || lat < -90 || lat > 90 || !Number.isFinite(lon) || lon < -180 || lon > 180) { toast('Informe latitude e longitude válidas em graus decimais.', 'error'); (!Number.isFinite(lat) ? latInput : lonInput).focus(); return; } selectPoint(lat, lon); if (innerWidth < 720) setSearchOpen(false); calculate(lat, lon); });
-    includeUpstreamInput.addEventListener('change', () => {
+    const recalculateOnOptionChange = () => {
       const lat = Number(String(latInput.value).replace(',', '.'));
       const lon = Number(String(lonInput.value).replace(',', '.'));
       if (Number.isFinite(lat) && lat >= -90 && lat <= 90 && Number.isFinite(lon) && lon >= -180 && lon <= 180 && String(latInput.value).trim() !== '' && String(lonInput.value).trim() !== '') {
@@ -576,7 +875,9 @@
       } else if (lastCalculation && lastCalculation.source !== 'drawn-geometry' && Number.isFinite(lastCalculation.latitude) && Number.isFinite(lastCalculation.longitude)) {
         calculate(lastCalculation.latitude, lastCalculation.longitude);
       }
-    });
+    };
+    includeUpstreamInput.addEventListener('change', recalculateOnOptionChange);
+    if (partialBasinInput) partialBasinInput.addEventListener('change', recalculateOnOptionChange);
     map.on('click', e => { if (isDrawing || isIsohyetEditing) return; selectPoint(e.latlng.lat, e.latlng.lng); if (innerWidth < 720) setSearchOpen(true); });
     map.on('pm:create', event => {
       if (event.shape !== 'Polygon') return;
@@ -585,6 +886,9 @@
     });
     locateButton.addEventListener('click', () => { if (!navigator.geolocation) return toast('Geolocalização indisponível neste navegador.', 'error'); locateButton.disabled = true; navigator.geolocation.getCurrentPosition(p => { locateButton.disabled = false; selectPoint(p.coords.latitude, p.coords.longitude, true); toast('Localização preenchida. Confira o ponto e calcule a vazão.'); }, e => { locateButton.disabled = false; toast(e.code === 1 ? 'Permita o acesso à localização para usar este recurso.' : 'Não foi possível obter sua localização.', 'error'); }, { enableHighAccuracy: true, timeout: 10000, maximumAge: 60000 }); });
     byId('open-search').onclick = startNewConsultation; byId('close-search').onclick = () => setSearchOpen(false); byId('close-results').onclick = closeResults; byId('close-toast').onclick = () => byId('toast').hidden = true;
+    if (restoreSearchButton) restoreSearchButton.onclick = () => setSearchOpen(true);
+    if (toggleResultsButton) toggleResultsButton.onclick = () => resultsPanel.classList.contains('open') ? closeResults() : openResults();
+    if (togglePanelsButton) togglePanelsButton.onclick = toggleAllPanelsVisibility;
     simulationButton.onclick = openSimulation; byId('close-simulation').onclick = () => simulationDialog.close(); uploadInput.onchange = () => addIsohyetFiles(uploadInput.files); runSimulationButton.onclick = runIsohyetSimulation;
     simulationDialog.addEventListener('click', event => { if (event.target === simulationDialog) simulationDialog.close(); });
     byId('apply-isohyet-value').onclick = applySelectedIsohyetValue;
@@ -604,6 +908,563 @@
     const handleCancelDrawing = () => { setDrawingMode(false); toast('Desenho cancelado.'); };
     cancelDrawingButton.onclick = handleCancelDrawing;
     if (byId('cancel-drawing-mobile')) byId('cancel-drawing-mobile').onclick = handleCancelDrawing;
+
+    const regDialog = byId('regularization-dialog');
+    const regSourceMode = byId('reg-source-mode'), regSourceMapOption = byId('reg-source-map-option');
+    const regRegionField = byId('reg-region-field'), regRegionSelect = byId('reg-region-select');
+    const regQMode = byId('reg-q-mode'), regQDirectField = byId('reg-q-direct-field'), regAreaField = byId('reg-area-field'), regRainField = byId('reg-rain-field');
+    const regAvgQInput = byId('reg-avg-q'), regAreaInput = byId('reg-area-km2'), regRainInput = byId('reg-rainfall-mm');
+    const regQfInput = byId('reg-qf-input'), regReturnPeriodSelect = byId('reg-return-period'), regCustomProbField = byId('reg-custom-prob-field'), regCustomProbInput = byId('reg-custom-prob'), regScenarioNameInput = byId('reg-scenario-name');
+    const regScenarioList = byId('reg-scenario-list'), runRegSimulationButton = byId('run-reg-simulation'), regSimulationStatus = byId('reg-simulation-status');
+    const regResultsSection = byId('reg-results-section'), regFocusSelect = byId('reg-focus-scenario');
+    let regCatalog = null, regQueuedScenarios = [], regSimulatedScenarios = [];
+
+    async function ensureRegCatalog() {
+      if (regCatalog) return regCatalog;
+      const response = await fetch('/api/regularization_catalog');
+      if (!response.ok) throw new Error('Não foi possível carregar a tabela de parâmetros regionais.');
+      regCatalog = await response.json();
+      regRegionSelect.replaceChildren();
+      (regCatalog.regions || []).forEach(item => {
+        const opt = document.createElement('option');
+        opt.value = item.region;
+        opt.textContent = `Região ${item.region} (A = ${number(item.coef_a, 4)}; B = ${number(item.coef_b, 4)}; X₁₀ = ${number(item.xt_by_period?.[10], 3)})`;
+        if (item.region === 'H') opt.selected = true;
+        regRegionSelect.appendChild(opt);
+      });
+      return regCatalog;
+    }
+
+    const regQCalculatedOption = byId('reg-q-calculated-option');
+
+    function syncMapBasinOptions(data) {
+      if (!data || !data.rau || !Number.isFinite(data.avg_discharge)) return;
+      regSourceMapOption.disabled = false;
+      regSourceMapOption.textContent = `Bacia selecionada no mapa (Q̄ = ${number(data.avg_discharge, 2)} m³/s)`;
+      if (regQCalculatedOption) {
+        regQCalculatedOption.disabled = false;
+        regQCalculatedOption.textContent = `Usar vazão calculada da bacia (Q̄ = ${number(data.avg_discharge, 2)} m³/s)`;
+      }
+      byId('reg-use-map-basin').hidden = false;
+    }
+
+    function getActiveRegBaseParams() {
+      const useMap = regSourceMode.value === 'map' && lastCalculation && lastCalculation.rau;
+      const useCalculatedQ = regQMode.value === 'calculated' && lastCalculation && Number.isFinite(lastCalculation.avg_discharge);
+      if (useMap) {
+        const rau = lastCalculation.rau;
+        const regions = [...new Set((rau.bands || []).map(i => i.properties?.region).filter(Boolean))].map(r => r.toUpperCase());
+        const regionLabel = regions.length ? regions.join(', ') : 'Bacia';
+        const singleRegion = regions.length === 1 ? regions[0] : null;
+        const avgA = Number(rau.avg_a), avgB = Number(rau.avg_b), coefA = Number(rau.coef_a), coefB = Number(rau.coef_b);
+        const areaKm2 = Number(lastCalculation.area_km2), rainfallMm = Number(lastCalculation.isolines?.avg_areas);
+        const avgQ = useCalculatedQ
+          ? Number(lastCalculation.avg_discharge)
+          : regQMode.value === 'rainfall' && Number.isFinite(Number(regAreaInput.value)) && Number.isFinite(Number(regRainInput.value))
+            ? ((avgA + avgB * Number(regRainInput.value)) * Number(regAreaInput.value)) / 1000
+            : Number(regAvgQInput.value || lastCalculation.avg_discharge);
+        return {
+          source: 'map',
+          region: singleRegion,
+          region_label: `Bacia (${regionLabel})`,
+          avg_a: avgA,
+          avg_b: avgB,
+          coef_a: coefA,
+          coef_b: coefB,
+          xt_by_period: rau.xt_by_period || null,
+          area_km2: regQMode.value === 'rainfall' ? Number(regAreaInput.value) : areaKm2,
+          avg_rainfall_mm: regQMode.value === 'rainfall' ? Number(regRainInput.value) : rainfallMm,
+          avg_discharge_m3s: avgQ
+        };
+      }
+      const selectedRegionCode = regRegionSelect.value || 'H';
+      const regionEntry = (regCatalog?.regions || []).find(r => r.region === selectedRegionCode) || {
+        region: 'H', avg_a: -29.47, avg_b: 0.0315, coef_a: 0.4951, coef_b: 0.0279,
+        xt_by_period: { 10: 0.748, 15: 0.723, 20: 0.708, 25: 0.698, 50: 0.673, 100: 0.656 }
+      };
+      const areaKm2 = Number(regAreaInput.value);
+      const rainfallMm = Number(regRainInput.value);
+      const avgQ = useCalculatedQ
+        ? Number(lastCalculation.avg_discharge)
+        : regQMode.value === 'rainfall'
+          ? ((regionEntry.avg_a + regionEntry.avg_b * rainfallMm) * areaKm2) / 1000
+          : Number(regAvgQInput.value);
+      return {
+        source: 'region',
+        region: regionEntry.region,
+        region_label: `Região ${regionEntry.region}`,
+        avg_a: regionEntry.avg_a,
+        avg_b: regionEntry.avg_b,
+        coef_a: regionEntry.coef_a,
+        coef_b: regionEntry.coef_b,
+        xt_by_period: regionEntry.xt_by_period,
+        area_km2: areaKm2,
+        avg_rainfall_mm: rainfallMm,
+        avg_discharge_m3s: avgQ
+      };
+    }
+
+    function updateRegBaseSummary() {
+      regRegionField.hidden = regSourceMode.value === 'map';
+      const byRainfall = regQMode.value === 'rainfall';
+      const byCalculated = regQMode.value === 'calculated' && lastCalculation && Number.isFinite(lastCalculation.avg_discharge);
+      regQDirectField.hidden = byRainfall;
+      regAreaField.hidden = !byRainfall;
+      regRainField.hidden = !byRainfall;
+      regAvgQInput.readOnly = Boolean(byCalculated);
+      if (byId('reg-q-direct-label')) {
+        byId('reg-q-direct-label').textContent = byCalculated ? 'Vazão média calculada da bacia Q̄ (m³/s)' : 'Vazão média plurianual Q̄ (m³/s)';
+      }
+      const base = getActiveRegBaseParams();
+      if ((byRainfall || byCalculated) && Number.isFinite(base.avg_discharge_m3s) && base.avg_discharge_m3s > 0) {
+        regAvgQInput.value = base.avg_discharge_m3s.toFixed(2);
+      }
+      const xt10 = base.xt_by_period?.[10] ?? 0.748;
+      const q0_10 = Number.isFinite(base.avg_discharge_m3s) ? xt10 * base.coef_a * base.avg_discharge_m3s : NaN;
+      const q1_10 = Number.isFinite(base.avg_discharge_m3s) ? xt10 * (base.coef_a + base.coef_b) * base.avg_discharge_m3s : NaN;
+      const qMaxIntra10 = Number.isFinite(base.avg_discharge_m3s) ? Math.min(base.avg_discharge_m3s, xt10 * (base.coef_a + 12 * base.coef_b) * base.avg_discharge_m3s) : NaN;
+      byId('reg-params-summary').innerHTML = `
+        <div><span>Origem / Região</span><strong>${base.region_label}</strong></div>
+        <div><span>Coeficiente A</span><strong>${number(base.coef_a, 4)}</strong></div>
+        <div><span>Coeficiente B</span><strong>${number(base.coef_b, 4)}</strong></div>
+        <div><span>Fator X<sub>10</sub> (T=10a)</span><strong>${number(xt10, 3)}</strong></div>
+        <div><span>Vazão média Q̄</span><strong>${number(base.avg_discharge_m3s, 2)} m³/s</strong></div>
+        <div><span>Q<sub>1,10</sub> (Eq. 12)</span><strong>${number(q1_10, 2)} m³/s</strong></div>
+        <div><span>Faixa intra-anual (T=10a)</span><strong>${number(q0_10, 2)} a ${number(qMaxIntra10, 2)} m³/s</strong></div>
+      `;
+    }
+
+    function renderRegQueuedScenarios() {
+      regScenarioList.replaceChildren();
+      if (!regQueuedScenarios.length) {
+        const emptyMsg = document.createElement('p');
+        emptyMsg.className = 'upload-help';
+        emptyMsg.textContent = 'Nenhum cenário na fila. Adicione ao menos um cenário acima.';
+        regScenarioList.appendChild(emptyMsg);
+        return;
+      }
+      regQueuedScenarios.forEach((scen, idx) => {
+        const row = document.createElement('div');
+        row.className = 'scenario-option reg-queued-item';
+        const badge = document.createElement('span');
+        badge.className = 'reg-scenario-index';
+        badge.style.backgroundColor = scenarioColors[idx % scenarioColors.length];
+        badge.textContent = String(idx + 1);
+        const copy = document.createElement('span');
+        copy.className = 'scenario-copy';
+        const title = document.createElement('strong');
+        const prob = 100 / scen.return_period_years;
+        title.textContent = scen.name || `Cenário ${idx + 1} — QF = ${number(scen.qf_m3s, 2)} m³/s · Risco ${number(prob, 2)}% (T = ${number(scen.return_period_years, 1)} anos)`;
+        const detail = document.createElement('small');
+        detail.textContent = `Demanda firme QF: ${number(scen.qf_m3s, 2)} m³/s (${number(scen.qf_m3s * 1000, 0)} L/s) · Probabilidade de não atendimento: ${number(prob, 2)}% ao ano (T = ${number(scen.return_period_years, 1)} anos)`;
+        copy.append(title, detail);
+        const remove = document.createElement('button');
+        remove.type = 'button';
+        remove.className = 'scenario-remove';
+        remove.textContent = 'Remover';
+        remove.onclick = () => {
+          regQueuedScenarios = regQueuedScenarios.filter(item => item.id !== scen.id);
+          renderRegQueuedScenarios();
+        };
+        row.append(badge, copy, remove);
+        regScenarioList.appendChild(row);
+      });
+    }
+
+    function addRegScenarioFromInputs() {
+      if (regQueuedScenarios.length >= 12) return toast('O limite é de 12 cenários por simulação.', 'error');
+      const qf = Number(String(regQfInput.value).replace(',', '.'));
+      if (!Number.isFinite(qf) || qf <= 0) return toast('Informe uma vazão firme QF maior que zero (em m³/s).', 'error');
+      let tYears;
+      if (regReturnPeriodSelect.value === 'custom') {
+        const prob = Number(String(regCustomProbInput.value).replace(',', '.'));
+        if (!Number.isFinite(prob) || prob <= 0 || prob >= 100) return toast('Informe uma probabilidade anual y% entre 0,5% e 99%.', 'error');
+        tYears = 100 / prob;
+      } else {
+        tYears = Number(regReturnPeriodSelect.value);
+      }
+      const prob = 100 / tYears;
+      const customName = regScenarioNameInput.value.trim();
+      const name = customName || `QF ${number(qf, 2)} m³/s · ${number(prob, 2)}% (T=${number(tYears, tYears % 1 ? 1 : 0)} anos)`;
+      regQueuedScenarios.push({
+        id: `reg-${Date.now()}-${regQueuedScenarios.length + 1}`,
+        name,
+        qf_m3s: qf,
+        return_period_years: tYears,
+        failure_probability_percent: prob
+      });
+      regScenarioNameInput.value = '';
+      renderRegQueuedScenarios();
+    }
+
+    function addAllRiskScenariosForCurrentQf() {
+      const qf = Number(String(regQfInput.value).replace(',', '.'));
+      if (!Number.isFinite(qf) || qf <= 0) return toast('Informe uma vazão firme QF maior que zero (em m³/s).', 'error');
+      const periods = [10, 15, 20, 25, 50, 100];
+      regQueuedScenarios = periods.map((t, i) => {
+        const prob = 100 / t;
+        return {
+          id: `reg-risk-${t}-${Date.now()}-${i}`,
+          name: `QF ${number(qf, 2)} m³/s · ${number(prob, 2)}% (T=${t} anos)`,
+          qf_m3s: qf,
+          return_period_years: t,
+          failure_probability_percent: prob
+        };
+      });
+      renderRegQueuedScenarios();
+      runRegularizationSimulation();
+    }
+
+    function renderFigure4Chart(scenario) {
+      const container = byId('reg-figure4-chart');
+      if (!container || !scenario) return;
+      const series = scenario.monthly_series || [];
+      const maxD = 12;
+      const k = scenario.k_seconds_per_month || 2628000;
+      const maxDemandHm3 = (scenario.qf_m3s * k * maxD) / 1e6;
+      const maxAvailHm3 = series.length ? series[series.length - 1].available_volume_hm3 : maxDemandHm3;
+      const yMax = Math.max(maxDemandHm3, maxAvailHm3, scenario.volume_hm3 * 1.3, 1) * 1.08;
+
+      const width = 760, height = 300, padL = 62, padR = 26, padT = 22, padB = 42;
+      const plotW = width - padL - padR, plotH = height - padT - padB;
+      const xPos = d => padL + (d / maxD) * plotW;
+      const yPos = v => padT + plotH - Math.min(1, Math.max(0, v / yMax)) * plotH;
+
+      const availPts = [`${xPos(0).toFixed(1)},${yPos(0).toFixed(1)}`];
+      const demandPts = [`${xPos(0).toFixed(1)},${yPos(0).toFixed(1)}`, `${xPos(maxD).toFixed(1)},${yPos(maxDemandHm3).toFixed(1)}`];
+      for (let step = 1; step <= 48; step++) {
+        const d = (step / 48) * maxD;
+        const qd = scenario.xt * (scenario.coef_a + scenario.coef_b * d) * scenario.avg_discharge_m3s;
+        const volHm3 = (qd * k * d) / 1e6;
+        availPts.push(`${xPos(d).toFixed(1)},${yPos(volHm3).toFixed(1)}`);
+      }
+
+      const dc = Math.max(0, Math.min(maxD, scenario.critical_duration_months));
+      const demandAtDcHm3 = (scenario.qf_m3s * k * dc) / 1e6;
+      const availAtDcHm3 = (scenario.xt * (scenario.coef_a + scenario.coef_b * dc) * scenario.avg_discharge_m3s * k * dc) / 1e6;
+
+      let gridLines = '';
+      for (let i = 0; i <= 4; i++) {
+        const val = (yMax * i) / 4;
+        const y = yPos(val).toFixed(1);
+        gridLines += `<line x1="${padL}" y1="${y}" x2="${width - padR}" y2="${y}" stroke="#e2ecee" stroke-dasharray="3 3"/>`;
+        gridLines += `<text x="${padL - 8}" y="${Number(y) + 4}" text-anchor="end" fill="#526871" font-size="10">${number(val, 1)}</text>`;
+      }
+      for (let d = 0; d <= 12; d += 2) {
+        const x = xPos(d).toFixed(1);
+        gridLines += `<line x1="${x}" y1="${padT}" x2="${x}" y2="${padT + plotH}" stroke="#eef3f5"/>`;
+        gridLines += `<text x="${x}" y="${padT + plotH + 16}" text-anchor="middle" fill="#526871" font-size="10">${d} m</text>`;
+      }
+      const x6 = xPos(6).toFixed(1);
+
+      container.innerHTML = `
+        <svg viewBox="0 0 ${width} ${height}" width="100%" height="290" role="img" aria-label="Gráfico da Figura 4 do DAEE mostrando volume demandado, volume disponível e volume máximo de regularização Vc">
+          <rect x="${padL}" y="${padT}" width="${xPos(6) - padL}" height="${plotH}" fill="#f0f8ff" opacity="0.55"/>
+          ${gridLines}
+          <line x1="${x6}" y1="${padT}" x2="${x6}" y2="${padT + plotH}" stroke="#d97706" stroke-width="1.5" stroke-dasharray="5 4"/>
+          <text x="${Number(x6) - 6}" y="${padT + 13}" text-anchor="end" fill="#b45309" font-size="10" font-weight="700">Limite intra-anual (d = 6 meses)</text>
+          <polyline fill="none" stroke="#059669" stroke-width="2.6" points="${availPts.join(' ')}"/>
+          <polyline fill="none" stroke="#086fc1" stroke-width="2.6" points="${demandPts.join(' ')}"/>
+          ${dc > 0 ? `
+            <line x1="${xPos(dc).toFixed(1)}" y1="${yPos(demandAtDcHm3).toFixed(1)}" x2="${xPos(dc).toFixed(1)}" y2="${yPos(availAtDcHm3).toFixed(1)}" stroke="#e11d48" stroke-width="3"/>
+            <circle cx="${xPos(dc).toFixed(1)}" cy="${yPos(demandAtDcHm3).toFixed(1)}" r="4.5" fill="#e11d48" stroke="#fff" stroke-width="1.5"/>
+            <circle cx="${xPos(dc).toFixed(1)}" cy="${yPos(availAtDcHm3).toFixed(1)}" r="4.5" fill="#e11d48" stroke="#fff" stroke-width="1.5"/>
+            <text x="${Math.min(width - padR - 110, xPos(dc) + 8).toFixed(1)}" y="${((yPos(demandAtDcHm3) + yPos(availAtDcHm3)) / 2).toFixed(1)}" fill="#be123c" font-size="11" font-weight="800">Vc = ${number(scenario.volume_hm3, 2)} hm³ (dc = ${number(scenario.critical_duration_months, 1)} m)</text>
+          ` : ''}
+          <line x1="${padL}" y1="${padT + plotH}" x2="${width - padR}" y2="${padT + plotH}" stroke="#9fb1b8"/>
+          <line x1="${padL}" y1="${padT}" x2="${padL}" y2="${padT + plotH}" stroke="#9fb1b8"/>
+          <text x="${padL + plotW / 2}" y="${height - 6}" text-anchor="middle" fill="#17262d" font-size="11" font-weight="700">Duração d (meses)</text>
+          <text x="15" y="${padT + plotH / 2}" text-anchor="middle" fill="#17262d" font-size="11" font-weight="700" transform="rotate(-90 15 ${padT + plotH / 2})">Volume acumulado (hm³)</text>
+        </svg>
+      `;
+    }
+
+    function renderFocusedRegScenario(index) {
+      const scenario = regSimulatedScenarios[index] || regSimulatedScenarios[0];
+      if (!scenario) return;
+      const kpiGrid = byId('reg-kpi-grid');
+      const statusClass = scenario.status === 'valid_intra_annual' ? 'valid' : scenario.status === 'run_of_river' ? 'river' : 'warn';
+      kpiGrid.innerHTML = `
+        <article class="reg-kpi-card emphasis">
+          <span>Volume de regularização V<sub>c</sub> — Eq. (14)</span>
+          <strong>${number(scenario.volume_hm3, 2)} hm³</strong>
+          <small>${number(scenario.volume_m3, 0)} m³ (${number(scenario.volume_hm3, 2)} × 10⁶ m³)</small>
+        </article>
+        <article class="reg-kpi-card emphasis">
+          <span>Duração crítica d<sub>c</sub> — Eq. (15)</span>
+          <strong>${number(scenario.critical_duration_months, 1)} meses</strong>
+          <small>Valor exato: ${number(scenario.critical_duration_months, 2)} meses (limite ≤ 6,0 m)</small>
+        </article>
+        <article class="reg-kpi-card">
+          <span>Demanda firme Q<sub>F</sub> e Risco y%</span>
+          <strong>${number(scenario.qf_m3s, 2)} m³/s · ${number(scenario.failure_probability_percent, 2)}%</strong>
+          <small>T = ${number(scenario.return_period_years, scenario.return_period_years % 1 ? 1 : 0)} anos · ${number(scenario.qf_percent_of_avg, 1)}% de Q̄ (${number(scenario.avg_discharge_m3s, 2)} m³/s)</small>
+        </article>
+        <article class="reg-kpi-card ${statusClass}">
+          <span>Diagnóstico metodológico DAEE</span>
+          <strong>${scenario.status === 'valid_intra_annual' ? 'Intra-anual (≤ 6 meses)' : scenario.status === 'run_of_river' ? 'Fio d’água (Vc = 0)' : 'Atenção: d_c > 6 meses'}</strong>
+          <small>${scenario.status_label}</small>
+        </article>
+      `;
+
+      byId('reg-formula-memory').innerHTML = `
+        <div class="reg-memory-title">Memória de cálculo — ${scenario.name} (${scenario.region_label})</div>
+        <div class="reg-memory-lines">
+          <div><b>Equação (12) [Q<sub>1,${number(scenario.return_period_years, 0)}</sub>]:</b> <code>X<sub>T</sub> · (A + B · 1) · Q̄ = ${number(scenario.xt, 3)} · (${number(scenario.coef_a, 4)} + ${number(scenario.coef_b, 4)} · 1) · ${number(scenario.avg_discharge_m3s, 2)} = <b>${number(scenario.q1_t_m3s, 2)} m³/s</b></code></div>
+          <div><b>Equação (14) [V<sub>c</sub>]:</b> <code>[ [ ${number(scenario.qf_m3s, 2)} − (${number(scenario.xt, 3)} · ${number(scenario.coef_a, 4)} · ${number(scenario.avg_discharge_m3s, 2)}) ]² / (4 · ${number(scenario.xt, 3)} · ${number(scenario.coef_b, 4)} · ${number(scenario.avg_discharge_m3s, 2)}) ] · 2.628.000 = <b>${number(scenario.volume_m3, 0)} m³ (${number(scenario.volume_hm3, 2)} × 10⁶ m³)</b></code></div>
+          <div><b>Equação (15) [d<sub>c</sub>]:</b> <code>[ ${number(scenario.qf_m3s, 2)} − (${number(scenario.xt, 3)} · ${number(scenario.coef_a, 4)} · ${number(scenario.avg_discharge_m3s, 2)}) ] / (2 · ${number(scenario.xt, 3)} · ${number(scenario.coef_b, 4)} · ${number(scenario.avg_discharge_m3s, 2)}) = <b>${number(scenario.critical_duration_months, 1)} meses</b> (${number(scenario.critical_duration_months, 2)} meses)</code></div>
+        </div>
+      `;
+
+      renderFigure4Chart(scenario);
+
+      const monthlyBody = byId('reg-monthly-table-body');
+      monthlyBody.replaceChildren();
+      (scenario.monthly_series || []).slice(0, 6).forEach(item => {
+        const tr = document.createElement('tr');
+        tr.innerHTML = `
+          <th scope="row">${item.d_months} ${item.d_months === 1 ? 'mês' : 'meses'}</th>
+          <td>${number(item.q_min_m3s, 2)} m³/s</td>
+          <td>${number(item.demand_volume_hm3, 2)} hm³</td>
+          <td>${number(item.available_volume_hm3, 2)} hm³</td>
+          <td><strong>${number(item.regularization_volume_hm3, 2)} hm³</strong></td>
+          <td>${number(item.regularization_volume_m3, 0)} m³</td>
+        `;
+        monthlyBody.appendChild(tr);
+      });
+    }
+
+    function renderRegularizationComparison(scenarios) {
+      regSimulatedScenarios = scenarios;
+      regResultsSection.hidden = false;
+      text('reg-comparison-count', `${scenarios.length} ${scenarios.length === 1 ? 'cenário' : 'cenários'}`);
+
+      const highestVol = [...scenarios].sort((a, b) => b.volume_hm3 - a.volume_hm3)[0];
+      const first = scenarios[0];
+      text('reg-comparison-summary', scenarios.length === 1
+        ? `Para regularizar QF = ${number(first.qf_m3s, 2)} m³/s com ${number(first.failure_probability_percent, 2)}% (T = ${number(first.return_period_years, 0)} anos) de probabilidade de não atendimento na ${first.region_label}, o volume necessário pela Equação (14) é Vc = ${number(first.volume_hm3, 2)} hm³ (${number(first.volume_m3, 0)} m³) e a duração crítica pela Equação (15) é dc = ${number(first.critical_duration_months, 1)} meses.`
+        : `Foram comparados ${scenarios.length} cenários. O maior volume de regularização ocorre em "${highestVol.name}" com Vc = ${number(highestVol.volume_hm3, 2)} hm³ (${number(highestVol.volume_m3, 0)} m³) e duração crítica dc = ${number(highestVol.critical_duration_months, 1)} meses.`
+      );
+
+      regFocusSelect.replaceChildren();
+      scenarios.forEach((scen, idx) => {
+        const opt = document.createElement('option');
+        opt.value = String(idx);
+        opt.textContent = `${scen.name} — Vc = ${number(scen.volume_hm3, 2)} hm³ · dc = ${number(scen.critical_duration_months, 1)} m`;
+        regFocusSelect.appendChild(opt);
+      });
+
+      const chart = byId('reg-comparison-chart');
+      chart.replaceChildren();
+      const chartMetrics = [
+        { key: 'volume_hm3', label: 'Volume de regularização Vc — Equação (14)', unit: 'hm³', digits: 2 },
+        { key: 'critical_duration_months', label: 'Duração crítica dc — Equação (15)', unit: 'meses', digits: 1 }
+      ];
+      chartMetrics.forEach(metric => {
+        const group = document.createElement('section');
+        group.className = 'chart-group';
+        const h4 = document.createElement('h4');
+        h4.textContent = metric.label;
+        group.appendChild(h4);
+        const max = Math.max(...scenarios.map(s => Number(s[metric.key]) || 0), 0.01);
+        scenarios.forEach((scen, idx) => {
+          const row = document.createElement('div');
+          row.className = 'chart-row';
+          const label = document.createElement('span');
+          label.className = 'chart-label';
+          label.textContent = scen.name;
+          const track = document.createElement('span');
+          track.className = 'chart-track';
+          const bar = document.createElement('i');
+          const val = Number(scen[metric.key]) || 0;
+          bar.style.width = `${val > 0 ? Math.max(3, (val / max) * 100) : 0}%`;
+          bar.style.backgroundColor = scenarioColors[idx % scenarioColors.length];
+          track.appendChild(bar);
+          const strong = document.createElement('strong');
+          strong.textContent = `${number(val, metric.digits)} ${metric.unit}`;
+          const small = document.createElement('small');
+          small.textContent = `${number(scen.failure_probability_percent, 1)}% (T=${number(scen.return_period_years, 0)}a)`;
+          row.append(label, track, strong, small);
+          group.appendChild(row);
+        });
+        chart.appendChild(group);
+      });
+
+      const tbody = byId('reg-comparison-table-body');
+      tbody.replaceChildren();
+      scenarios.forEach((scen, idx) => {
+        const tr = document.createElement('tr');
+        const statusShort = scen.status === 'valid_intra_annual' ? 'Intra-anual (≤ 6m)' : scen.status === 'run_of_river' ? 'Fio d’água' : 'dc > 6 meses';
+        tr.innerHTML = `
+          <th scope="row"><i class="scenario-swatch" style="background:${scenarioColors[idx % scenarioColors.length]}"></i><span>${scen.name}</span></th>
+          <td>${scen.region_label}</td>
+          <td>${number(scen.avg_discharge_m3s, 2)}</td>
+          <td><strong>${number(scen.qf_m3s, 2)}</strong></td>
+          <td>${number(scen.failure_probability_percent, 2)}% (T=${number(scen.return_period_years, scen.return_period_years % 1 ? 1 : 0)}a)</td>
+          <td>${number(scen.xt, 3)}</td>
+          <td>${number(scen.q1_t_m3s, 2)}</td>
+          <td><strong>${number(scen.critical_duration_months, 1)}</strong></td>
+          <td><strong>${number(scen.volume_hm3, 2)}</strong></td>
+          <td>${number(scen.volume_m3, 0)}</td>
+          <td>${statusShort}</td>
+        `;
+        tbody.appendChild(tr);
+      });
+
+      renderFocusedRegScenario(0);
+    }
+
+    async function runRegularizationSimulation() {
+      if (!regQueuedScenarios.length) {
+        addRegScenarioFromInputs();
+        if (!regQueuedScenarios.length) return;
+      }
+      const base = getActiveRegBaseParams();
+      if (!Number.isFinite(base.avg_discharge_m3s) || base.avg_discharge_m3s <= 0) {
+        return toast('Informe uma vazão média plurianual Q̄ válida maior que zero.', 'error');
+      }
+      runRegSimulationButton.disabled = true;
+      runRegSimulationButton.classList.add('loading');
+      regSimulationStatus.textContent = 'Calculando volume de regularização (Equação 14) e duração crítica (Equação 15)…';
+      try {
+        const response = await fetch('/api/regularization_simulation', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ base, scenarios: regQueuedScenarios })
+        });
+        const data = await response.json().catch(() => ({}));
+        if (!response.ok) throw new Error(data.error || 'Não foi possível executar a simulação de regularização.');
+        renderRegularizationComparison(data.scenarios);
+        regSimulationStatus.textContent = 'Simulação concluída com sucesso.';
+      } catch (error) {
+        regSimulationStatus.textContent = '';
+        toast(error.message, 'error');
+      } finally {
+        runRegSimulationButton.disabled = false;
+        runRegSimulationButton.classList.remove('loading');
+      }
+    }
+
+    function applyMapBasinToRegularization() {
+      if (!lastCalculation || !lastCalculation.rau) return;
+      syncMapBasinOptions(lastCalculation);
+      regSourceMode.value = 'map';
+      regQMode.value = 'calculated';
+      regAvgQInput.value = Number(lastCalculation.avg_discharge).toFixed(2);
+      if (Number.isFinite(lastCalculation.area_km2)) regAreaInput.value = Number(lastCalculation.area_km2).toFixed(2);
+      if (Number.isFinite(lastCalculation.isolines?.avg_areas)) regRainInput.value = Number(lastCalculation.isolines.avg_areas).toFixed(1);
+      const defaultQf = Math.max(0.01, Number((lastCalculation.avg_discharge * 0.5).toFixed(2)));
+      regQfInput.value = defaultQf.toFixed(2);
+      updateRegBaseSummary();
+      regQueuedScenarios = [
+        { id: 'map-t10', name: `QF ${number(defaultQf, 2)} m³/s · 10% (T=10 anos)`, qf_m3s: defaultQf, return_period_years: 10, failure_probability_percent: 10 },
+        { id: 'map-t25', name: `QF ${number(defaultQf, 2)} m³/s · 4% (T=25 anos)`, qf_m3s: defaultQf, return_period_years: 25, failure_probability_percent: 4 }
+      ];
+      renderRegQueuedScenarios();
+    }
+
+    function loadDaeeBuquiraExample() {
+      regSourceMode.value = 'region';
+      regRegionSelect.value = 'H';
+      regQMode.value = 'direct';
+      regAreaInput.value = '401.5';
+      regRainInput.value = '1685';
+      regAvgQInput.value = '9.48';
+      regQfInput.value = '5.00';
+      regReturnPeriodSelect.value = '10';
+      regCustomProbField.hidden = true;
+      updateRegBaseSummary();
+      regQueuedScenarios = [
+        { id: 'daee-ex-10', name: 'Exemplo DAEE (Rio Buquira) — QF 5,00 m³/s · 10% (T=10 anos)', qf_m3s: 5.0, return_period_years: 10, failure_probability_percent: 10 },
+        { id: 'daee-ex-20', name: 'Rio Buquira — QF 5,00 m³/s · 5% (T=20 anos)', qf_m3s: 5.0, return_period_years: 20, failure_probability_percent: 5 },
+        { id: 'daee-ex-50', name: 'Rio Buquira — QF 5,00 m³/s · 2% (T=50 anos)', qf_m3s: 5.0, return_period_years: 50, failure_probability_percent: 2 }
+      ];
+      renderRegQueuedScenarios();
+      runRegularizationSimulation();
+    }
+
+    async function openRegularization(preferMapBasin = false) {
+      try {
+        await ensureRegCatalog();
+        if (lastCalculation && lastCalculation.rau) {
+          syncMapBasinOptions(lastCalculation);
+        }
+        if (preferMapBasin && lastCalculation && lastCalculation.rau) {
+          applyMapBasinToRegularization();
+        } else if (!regQueuedScenarios.length) {
+          if (lastCalculation && lastCalculation.rau) applyMapBasinToRegularization();
+          else loadDaeeBuquiraExample();
+        } else {
+          updateRegBaseSummary();
+        }
+        regDialog.showModal();
+        runRegularizationSimulation();
+      } catch (error) {
+        toast(error.message, 'error');
+      }
+    }
+
+    byId('open-regularization').onclick = () => openRegularization(true);
+    byId('open-regularization-header').onclick = () => openRegularization(false);
+    byId('close-regularization').onclick = () => regDialog.close();
+    regDialog.addEventListener('click', event => { if (event.target === regDialog) regDialog.close(); });
+    async function ensureMapCalculationIfAvailable() {
+      if (lastCalculation && Number.isFinite(lastCalculation.avg_discharge)) return true;
+      const lat = Number(String(latInput.value).replace(',', '.'));
+      const lon = Number(String(lonInput.value).replace(',', '.'));
+      if (String(latInput.value).trim() !== '' && String(lonInput.value).trim() !== '' && Number.isFinite(lat) && Number.isFinite(lon)) {
+        await calculate(lat, lon);
+        return Boolean(lastCalculation && Number.isFinite(lastCalculation.avg_discharge));
+      }
+      return false;
+    }
+
+    regSourceMode.onchange = async () => {
+      if (regSourceMode.value === 'map') {
+        const hasCalc = await ensureMapCalculationIfAvailable();
+        if (hasCalc) {
+          applyMapBasinToRegularization();
+          runRegularizationSimulation();
+          return;
+        }
+        toast('Selecione um ponto no mapa e clique em Calcular vazão para obter os dados da bacia.', 'error');
+        regSourceMode.value = 'region';
+      } else if (regSourceMode.value === 'region' && regQMode.value === 'calculated' && (!lastCalculation || !Number.isFinite(lastCalculation.avg_discharge))) {
+        regQMode.value = 'direct';
+      }
+      updateRegBaseSummary();
+    };
+    regRegionSelect.onchange = updateRegBaseSummary;
+    regQMode.onchange = async () => {
+      if (regQMode.value === 'calculated') {
+        const hasCalc = await ensureMapCalculationIfAvailable();
+        if (!hasCalc) {
+          toast('Calcule uma bacia no mapa primeiro para usar a vazão calculada.', 'error');
+          regQMode.value = 'direct';
+        }
+      }
+      updateRegBaseSummary();
+    };
+    regAvgQInput.oninput = updateRegBaseSummary;
+    regAreaInput.oninput = updateRegBaseSummary;
+    regRainInput.oninput = updateRegBaseSummary;
+    regReturnPeriodSelect.onchange = () => { regCustomProbField.hidden = regReturnPeriodSelect.value !== 'custom'; };
+    byId('reg-add-scenario').onclick = addRegScenarioFromInputs;
+    byId('reg-add-all-risks').onclick = addAllRiskScenariosForCurrentQf;
+    byId('reg-clear-scenarios').onclick = () => { regQueuedScenarios = []; renderRegQueuedScenarios(); regResultsSection.hidden = true; };
+    byId('reg-load-daee-example').onclick = loadDaeeBuquiraExample;
+    byId('reg-use-map-basin').onclick = () => { applyMapBasinToRegularization(); runRegularizationSimulation(); };
+    runRegSimulationButton.onclick = runRegularizationSimulation;
+    regFocusSelect.onchange = () => renderFocusedRegScenario(Number(regFocusSelect.value));
+    document.querySelectorAll('.reg-chip').forEach(chip => {
+      chip.onclick = () => {
+        const base = getActiveRegBaseParams();
+        const ratio = Number(chip.dataset.qfRatio);
+        if (Number.isFinite(base.avg_discharge_m3s) && base.avg_discharge_m3s > 0 && Number.isFinite(ratio)) {
+          regQfInput.value = Math.max(0.01, base.avg_discharge_m3s * ratio).toFixed(2);
+        }
+      };
+    });
     document.addEventListener('keydown', event => {
       if ((!isDrawing && !drawingAdjustmentRegion) || isEditableTarget(event.target)) return;
       if (!event.repeat && (event.key.toLowerCase() === 'd' || event.key === 'Backspace')) { if (undoLastDrawnVertex()) event.preventDefault(); }

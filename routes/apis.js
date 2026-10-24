@@ -937,6 +937,107 @@ router.get('/find_coefs_by_region/:lat/:lon', function(req,res,next){
 /**
  * Merge all layers by coordinates
  */
+const openApiSpec = require('../public/openapi.json');
+
+router.get('/openapi.json', function(req, res) {
+    res.status(200).json(openApiSpec);
+});
+
+router.get('/regularization_catalog', function(req, res) {
+    const catalog = regflow.getRegionalParametersCatalog();
+    res.status(200).json({
+        ...catalog,
+        example: {
+            title: 'Rio Buquira ou do Ferrão (Paraíba do Sul — Exemplo DAEE 1988)',
+            region: 'H',
+            rxyz: 'Z',
+            area_km2: 401.5,
+            avg_rainfall_mm: 1685,
+            avg_discharge_m3s: 9.48,
+            qf_m3s: 5.0,
+            return_period_years: 10,
+            failure_probability_percent: 10
+        }
+    });
+});
+
+router.post('/regularization_simulation', limitCoordinateRequests, function(req, res, next) {
+    try {
+        const body = req.body || {};
+        const requested = Array.isArray(body.scenarios) ? body.scenarios : [];
+        if (requested.length < 1 || requested.length > 12) {
+            const error = new Error('Informe entre 1 e 12 cenários de regularização de vazão.');
+            error.status = 400;
+            throw error;
+        }
+
+        const base = body.base || {};
+        const results = requested.map((item, idx) => {
+            const regionRaw = String(item.region || base.region || '').trim().toLowerCase();
+            const hasSingleRegion = /^[a-u]$/.test(regionRaw);
+            const regionLabel = String(item.region_label || base.region_label || (hasSingleRegion ? regionRaw.toUpperCase() : 'Ponderada')).trim();
+
+            let coefA = Number(item.coef_a ?? base.coef_a);
+            let coefB = Number(item.coef_b ?? base.coef_b);
+            if ((!Number.isFinite(coefA) || !Number.isFinite(coefB)) && hasSingleRegion) {
+                const ab = regflow.getMeansABCoef(regionRaw);
+                coefA = ab.a;
+                coefB = ab.b;
+            }
+
+            let avgQ = Number(item.avg_discharge_m3s ?? base.avg_discharge_m3s);
+            if (!Number.isFinite(avgQ) || avgQ <= 0) {
+                const areaKm2 = Number(item.area_km2 ?? base.area_km2);
+                const rainfallMm = Number(item.avg_rainfall_mm ?? base.avg_rainfall_mm);
+                let avgA = Number(item.avg_a ?? base.avg_a);
+                let avgB = Number(item.avg_b ?? base.avg_b);
+                if ((!Number.isFinite(avgA) || !Number.isFinite(avgB)) && hasSingleRegion) {
+                    const rel = regflow.getRelationRainToFlowRate(regionRaw);
+                    avgA = rel.param_a;
+                    avgB = rel.param_b;
+                }
+                if (Number.isFinite(areaKm2) && areaKm2 > 0 && Number.isFinite(rainfallMm) && rainfallMm > 0 && Number.isFinite(avgA) && Number.isFinite(avgB)) {
+                    avgQ = regflow.calculateAvgFlowRateLongPeriod(avgA, avgB, rainfallMm, areaKm2);
+                }
+            }
+
+            let calc;
+            try {
+                calc = regflow.calculateRegularizationScenario({
+                    qf_m3s: item.qf_m3s,
+                    return_period_years: item.return_period_years,
+                    failure_probability_percent: item.failure_probability_percent,
+                    avg_discharge_m3s: avgQ,
+                    coef_a: coefA,
+                    coef_b: coefB,
+                    xt: item.xt,
+                    xt_by_period: item.xt_by_period || base.xt_by_period,
+                    region: hasSingleRegion ? regionRaw : undefined
+                });
+            } catch (err) {
+                const validationError = new Error(`Cenário ${idx + 1}: ${err.message}`);
+                validationError.status = 400;
+                throw validationError;
+            }
+
+            const defaultName = `Cenário ${idx + 1} — QF ${calc.qf_m3s.toFixed(2).replace('.', ',')} m³/s · ${Number(calc.failure_probability_percent.toFixed(2)).toString().replace('.', ',')}% (T=${Number(calc.return_period_years.toFixed(1)).toString().replace('.', ',')} anos)`;
+            return {
+                id: String(item.id || `reg-scenario-${idx + 1}`).slice(0, 80),
+                name: String(item.name || defaultName).trim().slice(0, 120),
+                region_label: regionLabel,
+                ...calc
+            };
+        });
+
+        res.status(200).json({
+            k_seconds_per_month: 2628000,
+            scenarios: results
+        });
+    } catch (error) {
+        next(error);
+    }
+});
+
 router.get('/isohyet_catalog', function(req, res) {
     res.status(200).json(isohyetCatalog);
 });
@@ -1070,8 +1171,9 @@ router.get('/coords_join/:lat/:lon', limitCoordinateRequests, function(req,res,n
         var lat = parseFloat(req.params['lat']);
         var lon = parseFloat(req.params['lon']);
         const includeUpstream = req.query.include_upstream === 'true' || req.query.include_upstream === '1';
+        const partialBasin = !(req.query.partial_basin === 'false' || req.query.partial_basin === '0');
 
-        const cacheKey = `${lat.toFixed(5)},${lon.toFixed(5)},${includeUpstream ? 'up' : 'single'}`;
+        const cacheKey = `${lat.toFixed(5)},${lon.toFixed(5)},${includeUpstream ? 'up' : 'single'},${partialBasin ? 'part' : 'full'}`;
         const cached = coordinateCache.get(cacheKey);
         if (cached && Date.now() - cached.createdAt < CACHE_TTL_MS) {
             res.set('X-Cache', 'HIT');
@@ -1129,7 +1231,16 @@ router.get('/coords_join/:lat/:lon', limitCoordinateRequests, function(req,res,n
         const startBasinCode = String(ottobacia_obj.properties.COBACIA);
         const upstreamBasinCodes = collectUpstreamBasinCodes(startBasinCode);
         ottotrecho_obj = await enrichStreamSegments(ottotrechosByBasin[startBasinCode] || []);
-        const splitResult = splitBasinUpstreamByPoint(ottobacia_obj, ottotrecho_obj, lat, lon);
+        const fullBasinAreaKm2 = turf.area(ottobacia_obj) / 1000000;
+        const splitResult = partialBasin
+            ? splitBasinUpstreamByPoint(ottobacia_obj, ottotrecho_obj, lat, lon)
+            : {
+                upstreamBasin: ottobacia_obj,
+                fullAreaKm2: fullBasinAreaKm2,
+                upstreamAreaKm2: fullBasinAreaKm2,
+                areaProportion: 1,
+                crossSection: null
+            };
         let ottobacia_full_obj = ottobacia_obj;
         ottobacia_obj = splitResult.upstreamBasin;
         let totalUpstreamAreaKm2 = splitResult.upstreamAreaKm2;
@@ -1252,6 +1363,7 @@ router.get('/coords_join/:lat/:lon', limitCoordinateRequests, function(req,res,n
             latitude: lat,
             longitude: lon,
             include_upstream: includeUpstream,
+            partial_basin: partialBasin,
             available_upstream_basins_count: upstreamBasinCodes.length,
             upstream_basins: upstreamBasinsSummary,
             area_km2: area_calc,

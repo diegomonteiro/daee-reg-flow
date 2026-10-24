@@ -1,0 +1,128 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="Documentação OpenAPI / Swagger da API REG-FLOW — SP-ÁGUAS">
+  <meta name="theme-color" content="#063f4c">
+  <title>REG-FLOW — Documentação da API (Swagger / OpenAPI)</title>
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 24 24%22><path fill=%22%23086fc1%22 d=%22M12 2C8.8 6.4 5 10.4 5 15a7 7 0 0014 0c0-4.6-3.8-8.6-7-13Z%22/></svg>">
+  <link rel="stylesheet" href="https://unpkg.com/swagger-ui-dist@5/swagger-ui.css">
+  <style>
+    :root {
+      --teal: #063f4c;
+      --blue: #086fc1;
+      --ink: #17262d;
+      --soft: #f3f7f8;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: Inter, ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+      background: var(--soft);
+      color: var(--ink);
+    }
+    .docs-header {
+      position: sticky;
+      top: 0;
+      z-index: 100;
+      height: 64px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 0 24px;
+      color: #fff;
+      background: linear-gradient(110deg, var(--teal), #073341);
+      box-shadow: 0 2px 12px #001e2833;
+    }
+    .docs-brand {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      color: inherit;
+      text-decoration: none;
+    }
+    .docs-logo {
+      width: 76px;
+      height: 51px;
+      object-fit: contain;
+    }
+    .docs-brand-name {
+      font-size: 20px;
+      font-weight: 800;
+      letter-spacing: .035em;
+    }
+    .docs-divider {
+      width: 1px;
+      height: 26px;
+      background: #ffffff66;
+    }
+    .docs-subtitle {
+      font-size: 14px;
+      color: #ffffffc7;
+    }
+    .docs-actions {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+    .docs-link {
+      display: inline-flex;
+      align-items: center;
+      gap: 7px;
+      padding: 8px 13px;
+      border: 1px solid #ffffff59;
+      border-radius: 8px;
+      color: #fff;
+      background: #ffffff14;
+      font-size: 13px;
+      font-weight: 650;
+      text-decoration: none;
+    }
+    .docs-link:hover {
+      background: #ffffff29;
+    }
+    .docs-container {
+      max-width: 1240px;
+      margin: 0 auto;
+      padding: 16px 20px 48px;
+    }
+    .swagger-ui .topbar { display: none; }
+  </style>
+</head>
+<body>
+  <header class="docs-header">
+    <a class="docs-brand" href="/" aria-label="SP-ÁGUAS — REG-FLOW, voltar ao mapa">
+      <img class="docs-logo" src="/images/SP-%C3%81guas-Branco.png" alt="" width="2016" height="1341">
+      <span class="docs-divider" aria-hidden="true"></span>
+      <span class="docs-brand-name">REG-FLOW</span>
+      <span class="docs-divider" aria-hidden="true"></span>
+      <span class="docs-subtitle">Swagger / OpenAPI 3.0</span>
+    </a>
+    <div class="docs-actions">
+      <a class="docs-link" href="/api/openapi.json" target="_blank" rel="noopener">Baixar openapi.json</a>
+      <a class="docs-link" href="/">Voltar ao Mapa</a>
+    </div>
+  </header>
+
+  <main class="docs-container">
+    <div id="swagger-ui"></div>
+  </main>
+
+  <script src="https://unpkg.com/swagger-ui-dist@5/swagger-ui-bundle.js" crossorigin="anonymous"></script>
+  <script>
+    window.addEventListener('DOMContentLoaded', function () {
+      window.ui = SwaggerUIBundle({
+        url: '/api/openapi.json',
+        dom_id: '#swagger-ui',
+        deepLinking: true,
+        docExpansion: 'list',
+        defaultModelsExpandDepth: 1,
+        filter: true,
+        tryItOutEnabled: true
+      });
+    });
+  </script>
+</body>
+</html>
+
