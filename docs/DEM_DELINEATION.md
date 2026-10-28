@@ -14,7 +14,7 @@ Foram revisados `AGENTS.md`, arquitetura, metodologia, referência de API e guia
 
 ## Preparação offline
 
-Requer GDAL (`gdalwarp`), GRASS GIS 8 (`grass`), Python e bibliotecas de `scripts/hydrology/requirements.txt`. Esses executáveis não são incluídos no Docker atual ou no ambiente serverless; provisionar um servidor com disco persistente para este serviço.
+Requer GDAL (`gdalwarp`), GRASS GIS 8 (`grass`), Python e bibliotecas de `scripts/hydrology/requirements.txt`. GDAL/GRASS para preparação offline não são incluídos na imagem Docker. A imagem inclui Python e as bibliotecas de execução; o Compose monta os rasters preparados de `HYDROLOGY_DATA_DIR` em `/app/data/hydrology`, somente para leitura. Ver [implantação no Ubuntu](../README.md#execução-em-produção-com-docker-compose---ambiente-de-produção-subpath-reg-flow).
 
 ```bash
 python3 -m venv .venv-hydrology
@@ -87,7 +87,7 @@ Limitação observada: há desacordo entre a drenagem vetorial e o MDE em alguns
 
 ## Erro de variáveis DEM não configuradas
 
-Se a API responder `Configure DEM_D8_PATH e DEM_ACCUMULATION_PATH`, reinicie o processo Node após editar o `.env`: variáveis são carregadas na inicialização. A aplicação carrega o `.env` da raiz do projeto com caminho absoluto, independentemente do diretório de execução. Variáveis já definidas no ambiente do processo têm precedência sobre o arquivo. Em Docker, alterações de `env_file` exigem recriar o contêiner, e os caminhos/dados/Python devem existir dentro dele; a imagem padrão não provisiona o runtime geoespacial.
+Se a API responder `Configure DEM_D8_PATH e DEM_ACCUMULATION_PATH`, reinicie o processo Node após editar o `.env`: variáveis são carregadas na inicialização. A aplicação carrega o `.env` da raiz do projeto com caminho absoluto, independentemente do diretório de execução. Variáveis já definidas no ambiente do processo têm precedência sobre o arquivo. Em Docker, alterações de `env_file` exigem recriar o contêiner, e os caminhos/dados/Python devem existir dentro dele; a imagem padrão inclui o runtime geoespacial, mas os rasters devem ser provisionados separadamente.
 
 ## Camada de topografia considerada
 

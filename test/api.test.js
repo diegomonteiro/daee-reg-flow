@@ -517,6 +517,24 @@ test('serves application, static assets, APIs and Swagger UI under /reg-flow sub
   assert.equal(spec.servers[0].url, '/reg-flow');
 });
 
+test('keeps public URLs under /reg-flow when the reverse proxy strips the prefix', async () => {
+  const headers = { 'X-Forwarded-Prefix': '/reg-flow' };
+  const index = await fetch(`${baseUrl}/`, { headers });
+  assert.equal(index.status, 200);
+  assert.match(await index.text(), /const serverBasePath = "\/reg-flow"/);
+  const docs = await fetch(`${baseUrl}/api-docs`, { headers });
+  assert.equal(docs.status, 200);
+  assert.match(await docs.text(), /href="\/reg-flow\/api\/openapi\.json"/);
+  const spec = await fetch(`${baseUrl}/api/openapi.json`, { headers });
+  assert.equal((await spec.json()).servers[0].url, '/reg-flow');
+  for (const path of ['/reg-flow/', '/reg-flow/javascripts/water-balance-loader.js', '/reg-flow/images/SP-%C3%81guas-Branco.png']) {
+    assert.equal((await fetch(`${baseUrl}${path}`)).status, 200, path);
+  }
+  const missing = await fetch(`${baseUrl}/reg-flow/api/unknown-endpoint`);
+  assert.equal(missing.status, 404);
+  assert.match(missing.headers.get('content-type'), /application\/json/);
+});
+
 test('MDE endpoint validates coordinates and basin coverage', async () => {
   for (const suffix of ['bad/-46', '91/-46']) {
     const response = await fetch(`${baseUrl}/api/dem_delineation/${suffix}`);

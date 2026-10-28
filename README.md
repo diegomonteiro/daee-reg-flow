@@ -31,28 +31,41 @@ npm run dev
 
 ## Execução em Produção com Docker Compose - Ambiente de Produção (Subpath `/reg-flow`)
 
-O projeto inclui [`Dockerfile`](Dockerfile) multi-stage otimizado (`node:24-alpine`, usuário não-root `node`, `HEALTHCHECK` nativo e *graceful shutdown* `SIGTERM`/`SIGINT`) e [`docker-compose.yml`](docker-compose.yml) configurado para rodar sob o subpath **`/reg-flow`** (`BASE_PATH=/reg-flow`) atrás do **Nginx já existente no servidor**:
+O projeto inclui [`Dockerfile`](Dockerfile) multi-stage otimizado (`node:24-bookworm-slim`, usuário não-root `node`, `HEALTHCHECK` nativo e *graceful shutdown* `SIGTERM`/`SIGINT`) e [`docker-compose.yml`](docker-compose.yml) configurado para rodar sob o subpath **`/reg-flow`** (`BASE_PATH=/reg-flow`) atrás do **Nginx já existente no servidor**:
 
-### 1. Subir o container da aplicação
+### 1. Preparar os dados e subir o container
+
+No Ubuntu, instale Docker Engine com o plugin Docker Compose. A imagem inclui Node.js 24 e Python com as bibliotecas geoespaciais de execução. GDAL/GRASS para **preparação offline** dos rasters devem ser instalados separadamente, conforme [DEM_DELINEATION.md](docs/DEM_DELINEATION.md).
+
+Antes de iniciar, copie os rasters preparados `d8.tif`, `accumulation.tif` e `elevation.tif` para `data/hydrology/state-v1/` no servidor, ou informe outro diretório em `HYDROLOGY_DATA_DIR`. Os arquivos precisam ser legíveis pelo usuário do contêiner e são montados somente para leitura; não fazem parte da imagem ou do Git. O Compose falha se o diretório não existir. Sem os rasters válidos, o cálculo parcial não funciona.
+
 ```bash
-cp .env.example .env   # Opcional: configure MAPBOX_TOKEN se desejar cota altimétrica
+cp .env.example .env
+# Edite .env: HYDROLOGY_DATA_DIR, MAPBOX_TOKEN (opcional) e
+# GEOMETRY_SIGNING_SECRET (segredo persistente, gerado com openssl rand -hex 32).
 docker compose up -d --build
+curl --fail http://127.0.0.1:3001/reg-flow/api/health
 ```
-*(Ou via npm: `npm run docker:up`)*
 
-### 2. Configuração recomendada no Nginx existente do servidor
-Adicione o bloco abaixo no `server { ... }` do Nginx já instalado no servidor (a aplicação aceita requisições tanto mantendo `/reg-flow` quanto com `X-Forwarded-Prefix`):
+A porta fica disponível em `127.0.0.1:3001` para o proxy existente no host. `HOST_PORT` altera a porta publicada; ajuste também o upstream do proxy. Se o proxy estiver em outro contêiner, conecte os serviços à mesma rede Docker e use `regflow:3001` como upstream. `127.0.0.1` dentro desse outro contêiner não aponta para o host.
+
+O Compose define `BASE_PATH=/reg-flow`, `TRUST_PROXY=1` e os caminhos DEM internos, independentemente dos caminhos locais usados no `.env`. Sem Docker, `NODE_ENV=production` também usa `/reg-flow` por padrão; `BASE_PATH` permite personalizar o prefixo (vazio publica na raiz).
+
+### 2. Configurar o proxy reverso existente
+
+Para Nginx no próprio Ubuntu, inclua o conteúdo de [`deploy/nginx-reg-flow.conf`](deploy/nginx-reg-flow.conf) **dentro do `server { ... }` existente**, mantendo o domínio, TLS e demais aplicações atuais:
+
 ```nginx
 location = /reg-flow {
-    return 301 $scheme://$http_host/reg-flow/;
+    return 308 /reg-flow/$is_args$args;
 }
 
 location /reg-flow/ {
-    proxy_pass http://127.0.0.1:3001/reg-flow/;
+    proxy_pass http://127.0.0.1:3001;
     proxy_http_version 1.1;
     proxy_set_header Host $host;
     proxy_set_header X-Real-IP $remote_addr;
-    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+    proxy_set_header X-Forwarded-For $remote_addr;
     proxy_set_header X-Forwarded-Proto $scheme;
     proxy_set_header X-Forwarded-Prefix /reg-flow;
     client_max_body_size 65M;
@@ -60,6 +73,10 @@ location /reg-flow/ {
     proxy_send_timeout 120s;
 }
 ```
+
+Valide com `sudo nginx -t` e aplique com `sudo systemctl reload nginx`. Acesse `https://SEU-DOMINIO/reg-flow/`, `/reg-flow/api-docs` e `/reg-flow/api/health`. O healthcheck confirma o processo e as camadas vetoriais; valide também uma consulta parcial para conferir os rasters MDE.
+
+O exemplo preserva `/reg-flow` ao encaminhar ao Node. Proxies que removem o prefixo também são suportados: mantenha `BASE_PATH=/reg-flow` ou envie `X-Forwarded-Prefix: /reg-flow`. Para outros proxies, encaminhe os mesmos cabeçalhos e permita corpos de pelo menos 65 MB. `TRUST_PROXY=1` corresponde a um proxy entre cliente e aplicação; ajuste se houver mais intermediários.
 
 ### 3. Monitoramento e encerramento
 ```bash

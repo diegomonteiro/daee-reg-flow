@@ -17,7 +17,7 @@ function normalizeBasePath(value) {
   return withLeadingSlash.replace(/\/+$/, '');
 }
 
-const configuredBasePath = normalizeBasePath(process.env.BASE_PATH || '');
+const configuredBasePath = normalizeBasePath(process.env.BASE_PATH ?? (process.env.NODE_ENV === 'production' ? '/reg-flow' : ''));
 
 function resolveBasePath(req) {
   const forwardedPrefix = normalizeBasePath(req.headers['x-forwarded-prefix']);

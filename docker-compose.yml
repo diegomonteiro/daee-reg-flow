@@ -17,11 +17,22 @@ services:
       TRUST_PROXY: ${TRUST_PROXY:-1}
       MAPBOX_TOKEN: ${MAPBOX_TOKEN:-}
       API_TOKEN: ${API_TOKEN:-}
+      DEM_PYTHON: /opt/hydrology/bin/python
+      DEM_D8_PATH: /app/data/hydrology/d8.tif
+      DEM_ACCUMULATION_PATH: /app/data/hydrology/accumulation.tif
+      DEM_ELEVATION_PATH: /app/data/hydrology/elevation.tif
       NODE_OPTIONS: ${NODE_OPTIONS:---max-old-space-size=1024}
+    volumes:
+      - type: bind
+        source: ${HYDROLOGY_DATA_DIR:-./data/hydrology/state-v1}
+        target: /app/data/hydrology
+        read_only: true
+        bind:
+          create_host_path: false
     ports:
-      - "${HOST_PORT:-3001}:3001"
+      - "${HOST_BIND:-127.0.0.1}:${HOST_PORT:-3001}:3001"
     healthcheck:
-      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3001/reg-flow/api/health').then(r => process.exit(r.ok ? 0 : 1)).catch(() => process.exit(1))"]
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3001/api/health').then(r => process.exit(r.ok ? 0 : 1)).catch(() => process.exit(1))"]
       interval: 30s
       timeout: 5s
       retries: 3
