@@ -8,6 +8,8 @@ var _ = require('lodash');
 const regflow = require('../models/regflow');
 const calculationMemorial = require('../services/calculation-memorial');
 const numericFormat = require('../public/javascripts/numbers');
+const { rainfallCoverage } = require('../services/rainfall-coverage');
+const { finiteResult } = require('../services/hydrology-values');
 
 require('dotenv').config({ path: require('node:path').join(__dirname, '..', '.env') });
 
@@ -19,9 +21,12 @@ var rau_json         = require('../public/layers/rau.json');
 var rxyz_json        = require('../public/layers/rxyz.json');
 var limite_sp_json   = require('../public/layers/limite_estadual_sp.json');
 
-const coordinateCache = new Map();
+const { JsonCache } = require('../services/json-cache');
+const { createGeometryProof } = require('../services/geometry-proof');
+const geometryProof = createGeometryProof();
+const coordinateCache = new JsonCache();
+setInterval(() => coordinateCache.prune(), 60000).unref();
 const coordinateRequests = new Map();
-const CACHE_TTL_MS = 15 * 60 * 1000;
 const ottotrechosByBasin = _.groupBy(ottotrechos_json.features, 'properties.COBACIA');
 const ottobaciasByCode = _.keyBy(ottobacias_json.features, 'properties.COBACIA');
 const upstreamCodesByJusante = {};
@@ -135,52 +140,54 @@ function countCoordinates(coordinates) {
 }
 
 function validateBasinGeometry(input, options = {}) {
-    if (!input || input.type !== 'Feature' || !input.geometry || !['Polygon', 'MultiPolygon'].includes(input.geometry.type)) {
-        const error = new Error('A valid Polygon or MultiPolygon GeoJSON feature is required');
-        error.status = 400;
-        throw error;
+    const invalid = (message, status = 400) => Object.assign(new Error(message), { status });
+    if (input?.type === 'Feature' && input.properties != null && (typeof input.properties !== 'object' || Array.isArray(input.properties))) {
+        throw invalid('GeoJSON properties must be an object or null');
     }
-    if (options.allowOfficialBasin && input.properties && input.properties.COBACIA) {
-        const official = ottobaciasByCode[String(input.properties.COBACIA)];
-        if (official && _.isEqual(input.geometry.coordinates, official.geometry.coordinates)) {
-            return { geometry: official, areaKm2: turf.area(official) / 1000000 };
-        }
-        if (official && (input.properties.is_upstream_subbasin || input.properties.is_upstream_network)) {
-            const areaKm2 = turf.area(input) / 1000000;
-            if (Number.isFinite(areaKm2) && areaKm2 > 0) {
-                return { geometry: input, areaKm2 };
+    const source = input?.type === 'Feature' ? input.geometry : input;
+    if (!source || !['Polygon', 'MultiPolygon'].includes(source.type) || !Array.isArray(source.coordinates)) {
+        throw invalid('A valid Polygon or MultiPolygon GeoJSON feature or geometry is required');
+    }
+    // Do not trust client bbox fields: Turf may use them instead of coordinates.
+    const geometry = { type: 'Feature', properties: input.type === 'Feature' ? { ...input.properties } : {},
+        geometry: { type: source.type, coordinates: source.coordinates } };
+    const polygons = source.type === 'Polygon' ? [source.coordinates] : source.coordinates;
+    let vertices = 0;
+    if (!polygons.length) throw invalid('The geometry cannot be empty');
+    for (const polygon of polygons) {
+        if (!Array.isArray(polygon) || !polygon.length) throw invalid('Invalid polygon rings');
+        for (const ring of polygon) {
+            if (!Array.isArray(ring) || ring.length < 4) throw invalid('A polygon ring requires at least four positions');
+            vertices += ring.length;
+            if (vertices > 100000) throw invalid('The geometry exceeds the limit of 100000 vertices', 413);
+            for (const position of ring) {
+                if (!Array.isArray(position) || position.length < 2 || position.length > 3 || !position.every(Number.isFinite) ||
+                    Math.abs(position[0]) > 180 || Math.abs(position[1]) > 90) throw invalid('Invalid GeoJSON position');
             }
+            if (!_.isEqual(ring[0], ring[ring.length - 1])) throw invalid('Polygon rings must be closed');
         }
     }
-    if (countCoordinates(input.geometry.coordinates) > 5000) {
-        const error = new Error('The geometry exceeds the limit of 5000 vertices');
-        error.status = 413;
-        throw error;
-    }
-
-    const geometry = turf.cleanCoords(input);
     const areaKm2 = turf.area(geometry) / 1000000;
-    if (!Number.isFinite(areaKm2) || areaKm2 <= 0) {
-        const error = new Error('The geometry must have a valid area');
-        error.status = 400;
-        throw error;
+    if (!Number.isFinite(areaKm2) || areaKm2 <= 0) throw invalid('The geometry must have a valid area');
+    if (options.allowOfficialBasin) {
+        const official = ottobaciasByCode[String(geometry.properties.COBACIA || '')];
+        if (official && _.isEqual(geometry.geometry, official.geometry)) {
+            return { geometry: official, areaKm2 };
+        }
+        // Complex official boundaries and their calculated subsets may contain
+        // touching rings or exceed the drawing limit. Only server proofs allow it.
+        if (geometryProof.verify(geometry)) return { geometry, areaKm2 };
     }
-    if (turf.kinks(geometry).features.length > 0) {
-        const error = new Error('The geometry cannot contain self-intersections');
-        error.status = 422;
-        throw error;
-    }
+    if (vertices > 5000) throw invalid('The geometry exceeds the limit of 5000 vertices', 413);
+    const cleaned = turf.cleanCoords(geometry);
+    if (turf.kinks(cleaned).features.length > 0) throw invalid('The geometry cannot contain self-intersections', 422);
     let isWithinState = true;
-    turf.flattenEach(geometry, polygon => {
+    turf.flattenEach(cleaned, polygon => {
         const checkState = state => options.allowPartialStateOverlap ? turf.booleanIntersects(polygon, state) : turf.booleanWithin(polygon, state);
         if (!limite_sp_json.features.some(checkState)) isWithinState = false;
     });
-    if (!isWithinState) {
-        const error = new Error('The geometry must be entirely within the State of São Paulo');
-        error.status = 400;
-        throw error;
-    }
-    return { geometry, areaKm2 };
+    if (!isWithinState) throw invalid('The geometry must be entirely within the State of São Paulo');
+    return { geometry: cleaned, areaKm2 };
 }
 
 function validateRainfallLayer(input) {
@@ -282,200 +289,6 @@ async function enrichStreamSegments(segments, includeElevation = true) {
     }));
 }
 
-function streamLengthInPolygon(line, poly, samples = 40) {
-    const totalLen = turf.length(line, { units: 'kilometers' });
-    if (!Number.isFinite(totalLen) || totalLen <= 1e-6) return 0;
-    let inside = 0;
-    for (let i = 0; i <= samples; i++) {
-        const pt = turf.along(line, (totalLen * i) / samples, { units: 'kilometers' });
-        if (turf.booleanPointInPolygon(pt, poly)) inside++;
-    }
-    return (inside / (samples + 1)) * totalLen;
-}
-
-function splitBasinUpstreamByPoint(ottobacia, streamSegments, lat, lon) {
-    const fullAreaKm2 = turf.area(ottobacia) / 1000000;
-    const primarySegment = Array.isArray(streamSegments) && streamSegments[0];
-    if (!primarySegment || !primarySegment.geometry) {
-        return { upstreamBasin: ottobacia, fullAreaKm2, upstreamAreaKm2: fullAreaKm2, areaProportion: 1, crossSection: null };
-    }
-    try {
-        const clickedPt = turf.point([lon, lat]);
-        const rawLines = primarySegment.geometry.type === 'LineString'
-            ? [primarySegment.geometry.coordinates]
-            : primarySegment.geometry.coordinates || [];
-        const validLines = rawLines.filter(line => Array.isArray(line) && line.length >= 2);
-        if (!validLines.length) {
-            return { upstreamBasin: ottobacia, fullAreaKm2, upstreamAreaKm2: fullAreaKm2, areaProportion: 1, crossSection: null };
-        }
-        const endpoints = primarySegment.properties && primarySegment.properties.stream_endpoints;
-        const upstreamCoord = endpoints && endpoints.upstream && endpoints.upstream.coordinates ? endpoints.upstream.coordinates : validLines[0][0];
-        const rawCoords = validLines[0];
-        const firstDistToUp = turf.distance(turf.point(rawCoords[0]), turf.point(upstreamCoord), { units: 'kilometers' });
-        const lastDistToUp = turf.distance(turf.point(rawCoords[rawCoords.length - 1]), turf.point(upstreamCoord), { units: 'kilometers' });
-        const orderedCoords = firstDistToUp <= lastDistToUp ? rawCoords : [...rawCoords].reverse();
-        const streamLine = turf.lineString(orderedCoords);
-        const upstreamPt = turf.point(orderedCoords[0]);
-        const downstreamPt = turf.point(orderedCoords[orderedCoords.length - 1]);
-        const snapped = turf.nearestPointOnLine(streamLine, clickedPt, { units: 'kilometers' });
-        const upDistFromCut = turf.distance(upstreamPt, snapped, { units: 'kilometers' });
-        const downDistFromCut = turf.distance(downstreamPt, snapped, { units: 'kilometers' });
-        if (upDistFromCut <= 0.02 || downDistFromCut <= 0.02) {
-            return { upstreamBasin: ottobacia, fullAreaKm2, upstreamAreaKm2: fullAreaKm2, areaProportion: 1, crossSection: null };
-        }
-        const [sx, sy] = snapped.geometry.coordinates;
-        const cosLat = Math.cos(lat * Math.PI / 180) || 1;
-        const bbox = turf.bbox(ottobacia);
-        const diag = Math.hypot((bbox[2] - bbox[0]) * cosLat, bbox[3] - bbox[1]) * 2 || 1;
-        const border = turf.polygonToLine(ottobacia);
-
-        const totalStreamLen = turf.length(streamLine, { units: 'kilometers' });
-        const snapLoc = Number.isFinite(snapped.properties && snapped.properties.location) ? snapped.properties.location : 0;
-        const windowKm = Math.max(0.4, Math.min(2.0, totalStreamLen * 0.15));
-        const pBefore = turf.along(streamLine, Math.max(0, snapLoc - windowKm), { units: 'kilometers' }).geometry.coordinates;
-        const pAfter = turf.along(streamLine, Math.min(totalStreamLen, snapLoc + windowKm), { units: 'kilometers' }).geometry.coordinates;
-        const tanDx = (pAfter[0] - pBefore[0]) * cosLat;
-        const tanDy = pAfter[1] - pBefore[1];
-        const tanLen = Math.hypot(tanDx, tanDy) || 1;
-        const tanX = tanDx / tanLen;
-        const tanY = tanDy / tanLen;
-        const macroNx = -tanY;
-        const macroNy = tanX;
-
-        const evaluateCandidate = (dirX, dirY) => {
-            const toCoord = s => [lon + (s * dirX) / cosLat, lat + s * dirY];
-            const farLine = turf.lineString([toCoord(-diag), toCoord(diag)]);
-            const streamIntersections = turf.lineIntersect(farLine, streamLine);
-            if (!streamIntersections || !streamIntersections.features || !streamIntersections.features.length) return null;
-            const streamHits = streamIntersections.features.map(f => {
-                const [x, y] = f.geometry.coordinates;
-                return { s: (x - lon) * cosLat * dirX + (y - lat) * dirY, coord: [x, y] };
-            }).sort((a, b) => Math.abs(a.s) - Math.abs(b.s));
-            const streamHit = streamHits[0];
-            const sStream = streamHit.s;
-            const sMinReq = Math.min(0, sStream);
-            const sMaxReq = Math.max(0, sStream);
-
-            const borderIntersections = turf.lineIntersect(farLine, border);
-            const sVals = (borderIntersections && borderIntersections.features || []).map(f => {
-                const [x, y] = f.geometry.coordinates;
-                return { s: (x - lon) * cosLat * dirX + (y - lat) * dirY, coord: [x, y] };
-            }).sort((a, b) => a.s - b.s);
-            if (sVals.length < 2) return null;
-            if (sVals.some(h => h.s > sMinReq + 1e-6 && h.s < sMaxReq - 1e-6)) return null;
-
-            const negIdx = sVals.findLastIndex(h => h.s <= sMinReq + 1e-7);
-            const posIdx = sVals.findIndex((h, idx) => idx > negIdx && h.s >= sMaxReq - 1e-7 && (negIdx === -1 || h.s - sVals[negIdx].s > 1e-5));
-            if (negIdx === -1 || posIdx === -1) return null;
-            const negHit = sVals[negIdx];
-            const posHit = sVals[posIdx];
-            if (!negHit || !posHit || posHit.s - negHit.s <= 1e-6) return null;
-            const midPt = turf.point(toCoord((negHit.s + posHit.s) / 2));
-            if (!turf.booleanPointInPolygon(midPt, ottobacia)) return null;
-
-            const chordKm = turf.distance(turf.point(negHit.coord), turf.point(posHit.coord), { units: 'kilometers' });
-            const chordLine = turf.lineString([negHit.coord, posHit.coord]);
-            const streamCrossings = Math.max(1, turf.lineIntersect(chordLine, streamLine).features.length);
-            return { negHit, posHit, streamCoord: streamHit.coord, sStream, chordKm, streamCrossings, sVals, negIdx, posIdx, toCoord };
-        };
-
-        const rawUx = (lon - sx) * cosLat;
-        const rawUy = lat - sy;
-        const len = Math.hypot(rawUx, rawUy);
-        const candidateDirs = [];
-        if (len > 1e-4) {
-            const dux = rawUx / len;
-            const duy = rawUy / len;
-            const dotTan = Math.abs(dux * tanX + duy * tanY);
-            if (dotTan <= 0.6) candidateDirs.push({ ux: dux, uy: duy, penalty: 0 });
-        }
-        for (const deg of [0, -15, 15, -30, 30]) {
-            const rad = (deg * Math.PI) / 180;
-            const c = Math.cos(rad);
-            const s = Math.sin(rad);
-            candidateDirs.push({
-                ux: macroNx * c - macroNy * s,
-                uy: macroNx * s + macroNy * c,
-                penalty: Math.abs(deg) * 0.02
-            });
-        }
-
-        const validCandidates = candidateDirs
-            .map(dir => {
-                const evaluated = evaluateCandidate(dir.ux, dir.uy);
-                if (!evaluated) return null;
-                const cost = (evaluated.streamCrossings > 1 ? (evaluated.streamCrossings - 1) * 5 : 0) + evaluated.chordKm + dir.penalty;
-                return { ...evaluated, cost };
-            })
-            .filter(Boolean)
-            .sort((a, b) => a.cost - b.cost);
-
-        if (!validCandidates.length) {
-            return { upstreamBasin: ottobacia, fullAreaKm2, upstreamAreaKm2: fullAreaKm2, areaProportion: 1, crossSection: null };
-        }
-
-        const bestCandidate = validCandidates[0];
-        const { negHit, posHit, streamCoord, sStream, sVals, negIdx, posIdx, toCoord } = bestCandidate;
-        const [x0, y0] = streamCoord;
-        const prevHit = negIdx > 0 ? sVals[negIdx - 1] : null;
-        const nextHit = posIdx !== -1 && posIdx < sVals.length - 1 ? sVals[posIdx + 1] : null;
-        const epsNeg = prevHit ? Math.min(0.00005, (negHit.s - prevHit.s) * 0.25) : 0.00005;
-        const epsPos = nextHit ? Math.min(0.00005, (nextHit.s - posHit.s) * 0.25) : 0.00005;
-
-        const sectionCoords = Math.abs(sStream) > 1e-5
-            ? (sStream < 0 ? [negHit.coord, [x0, y0], [lon, lat], posHit.coord] : [negHit.coord, [lon, lat], [x0, y0], posHit.coord])
-            : [negHit.coord, [x0, y0], posHit.coord];
-        const crossSection = {
-            line: turf.lineString(sectionCoords, { COBACIA: ottobacia.properties && ottobacia.properties.COBACIA }),
-            stream_point: [x0, y0],
-            clicked_point: [lon, lat],
-            border_points: [negHit.coord, posHit.coord]
-        };
-
-        const chordExtended = turf.lineString([toCoord(negHit.s - epsNeg), toCoord(posHit.s + epsPos)]);
-        const cutter = turf.buffer(chordExtended, 0.00005, { units: 'kilometers', steps: 4 });
-        const diff = turf.difference(ottobacia, cutter);
-        if (!diff) {
-            return { upstreamBasin: ottobacia, fullAreaKm2, upstreamAreaKm2: fullAreaKm2, areaProportion: 1, crossSection: null };
-        }
-        const cutStreamPt = turf.nearestPointOnLine(streamLine, turf.point([x0, y0]), { units: 'kilometers' });
-        const upstreamLine = turf.lineSlice(upstreamPt, cutStreamPt, streamLine);
-        const downstreamLine = turf.lineSlice(cutStreamPt, downstreamPt, streamLine);
-
-        const pieces = [];
-        turf.flattenEach(diff, poly => {
-            const area = turf.area(poly) / 1000000;
-            if (!Number.isFinite(area) || area <= 1e-6) return;
-            const upLen = streamLengthInPolygon(upstreamLine, poly);
-            const downLen = streamLengthInPolygon(downstreamLine, poly);
-            const hasUpPt = turf.booleanPointInPolygon(upstreamPt, poly);
-            const hasDownPt = turf.booleanPointInPolygon(downstreamPt, poly);
-            if ((upLen <= 1e-4 && !hasUpPt) || downLen > upLen) return;
-            const score = (upLen - downLen) + (hasUpPt ? 1000 : 0) - (hasDownPt ? 1000 : 0);
-            pieces.push({ poly, area, score });
-        });
-        if (!pieces.length) {
-            return { upstreamBasin: ottobacia, fullAreaKm2, upstreamAreaKm2: fullAreaKm2, areaProportion: 1, crossSection: null };
-        }
-        pieces.sort((a, b) => b.score - a.score);
-        const bestPiece = pieces[0];
-        const upstreamAreaKm2 = Math.min(bestPiece.area, fullAreaKm2);
-        const upstreamBasin = turf.multiPolygon(
-            [bestPiece.poly.geometry.coordinates],
-            { ...(ottobacia.properties || {}), is_upstream_subbasin: true }
-        );
-        return {
-            upstreamBasin,
-            fullAreaKm2,
-            upstreamAreaKm2,
-            areaProportion: fullAreaKm2 > 0 ? Math.min(upstreamAreaKm2 / fullAreaKm2, 1) : 1,
-            crossSection
-        };
-    } catch (error) {
-        return { upstreamBasin: ottobacia, fullAreaKm2, upstreamAreaKm2: fullAreaKm2, areaProportion: 1, crossSection: null };
-    }
-}
-
 async function calculateGeometry(geometry, options = {}) {
     const areaKm2 = turf.area(geometry) / 1000000;
     const regionCoefs = regflow.getRegionsCoeficientsByGeometry(geometry, 1, { units: 'kilometers' }, 'area', options.rainfallLayer || isolines_json);
@@ -508,20 +321,22 @@ async function calculateGeometry(geometry, options = {}) {
 function validateNumberParam(name, options = {}) {
     router.param(name, function(req, res, next, value) {
         const number = Number(value);
-        if (!Number.isFinite(number) || (options.min !== undefined && number < options.min) || (options.max !== undefined && number > options.max)) {
+        if (!Number.isFinite(number) || (options.min !== undefined && number < options.min) || (options.max !== undefined && number > options.max) || (options.integer && !Number.isInteger(number))) {
             return res.status(400).json({ error: `Invalid parameter: ${name}` });
         }
         next();
     });
 }
 
-['qf', 'xt', 'a', 'b', 'd', 'qls_m3s', 'k', 'coef_a', 'coef_b', 'avg_rainfall', 'area_km2', 'c', 'val_a', 'val_b'].forEach(validateNumberParam);
+validateNumberParam('coef_a'); // Rainfall regression intercept may be negative.
+['qf', 'a', 'd', 'qls_m3s', 'avg_rainfall'].forEach(name => validateNumberParam(name, { min: 0 }));
+['xt', 'b', 'k', 'coef_b', 'area_km2', 'c', 'val_a', 'val_b'].forEach(name => validateNumberParam(name, { min: Number.MIN_VALUE }));
 validateNumberParam('lat', { min: -90, max: 90 });
 validateNumberParam('lon', { min: -180, max: 180 });
-validateNumberParam('time', { min: 0, max: 5 });
-validateNumberParam('t', { min: 0, max: 5 });
-validateNumberParam('dmonth', { min: 1, max: 12 });
-validateNumberParam('months', { min: 1, max: 12 });
+validateNumberParam('time', { integer: true, min: 0, max: 5 });
+validateNumberParam('t', { integer: true, min: 0, max: 5 });
+validateNumberParam('dmonth', { integer: true, min: 1, max: 12 });
+validateNumberParam('months', { integer: true, min: 1, max: 12 });
 
 router.param('region', function(req, res, next, value) {
     if (!/^[a-u]$/i.test(value)) return res.status(400).json({ error: 'Invalid parameter: region' });
@@ -595,7 +410,7 @@ router.get('/calculate_critical_duration/:qf/:xt/:a/:b/:qls_m3s', function(req,r
         var b  = parseFloat(req.params['b']);
         var q  = parseFloat(req.params['qls_m3s']);
 
-        var ret = (qf-(xt*a*q))/(2*xt*b*q);
+        var ret = finiteResult((qf-(xt*a*q))/(2*xt*b*q));
 
         res.status(200).json({
             critical_duration: ret
@@ -618,7 +433,7 @@ router.get('/calculate_volume_regularization/:qf/:xt/:a/:b/:d/:qls_m3s/:k', func
         var q  = parseFloat(req.params['qls_m3s']);
         var k  = parseFloat(req.params['k']);
 
-        var ret = (qf-xt*(a+b*d)*q)*k*d;
+        var ret = finiteResult((qf-xt*(a+b*d)*q)*k*d);
 
         res.status(200).json({
             vol: ret
@@ -1166,8 +981,7 @@ router.post('/isohyet_simulation', limitCoordinateRequests, function(req, res, n
         const referenceAreaKm2 = rauCoveredArea > 0 ? Math.min(validated.areaKm2, rauCoveredArea) : validated.areaKm2;
         const results = scenarios.map(scenario => {
             const rainfall = regflow.getMeanRainfallByGeometry(validated.geometry, 1, { units: 'kilometers' }, 'area', scenario.layer);
-            const coveredArea = (rainfall.bands || []).reduce((sum, band) => sum + Number(band.properties.partial_area || 0), 0);
-            const coverage = Math.min(coveredArea / referenceAreaKm2, 1);
+            const coverage = rainfallCoverage(rainfall.bands || [], referenceAreaKm2);
             if (!Number.isFinite(coverage) || coverage < 0.95) {
                 const error = new Error(`Isohyet scenario "${scenario.name}" covers less than 95% of the selected basin`);
                 error.status = 422;
@@ -1191,10 +1005,92 @@ router.post('/isohyet_simulation', limitCoordinateRequests, function(req, res, n
     run().catch(next);
 });
 
+const { createWaterBalanceService, calculateCommitment } = require('../services/water-balance');
+const queryWaterBalance = createWaterBalanceService();
+const progressiveWaterBalance = require('../services/water-balance-loading').createWaterBalanceLoading();
+const outorgaPageRequests = new Map();
+function limitOutorgaPages(req, res, next) {
+    const now = Date.now(), key = req.ip || req.socket.remoteAddress || 'unknown';
+    for (const [ip, item] of outorgaPageRequests) if (now - item.startedAt >= 60000) outorgaPageRequests.delete(ip);
+    if (!outorgaPageRequests.has(key)) {
+        if (outorgaPageRequests.size >= 1000) return res.set('Retry-After', '60').status(429).json({ error: 'Muitas consultas de outorgas. Aguarde um minuto.' });
+        outorgaPageRequests.set(key, { startedAt: now, count: 0 });
+    }
+    const current = outorgaPageRequests.get(key);
+    if (++current.count > 180) {
+        const retryAfter = Math.max(1, Math.ceil((current.startedAt + 60000 - now) / 1000));
+        return res.set('Retry-After', String(retryAfter)).status(429).json({ error: 'Aguarde para continuar o carregamento das outorgas.' });
+    }
+    next();
+}
+function waterBalanceGeometry(input) {
+    if (countCoordinates(input?.geometry?.coordinates || input?.coordinates) > 100000) {
+        throw Object.assign(new Error('A geometria excede 100 mil coordenadas para consultar outorgas.'), { status: 413 });
+    }
+    return validateBasinGeometry(input, { allowOfficialBasin: true }).geometry;
+}
+router.post('/water_balance/start', limitCoordinateRequests, async function(req, res, next) {
+    try {
+        const geometry = waterBalanceGeometry(req.body?.geometry);
+        const natural = await calculateGeometry(geometry, { includeElevation: false });
+        const reference = { method: 'DAEE (1988)', area_km2: natural.area_km2,
+            avg_discharge: natural.avg_discharge, q95: natural.q95, q710: natural.q710 };
+        const result = progressiveWaterBalance.start(geometry, reference,
+            req.body.selection === 'drawn-geometry' ? 'drawn-geometry' : 'calculated-geometry');
+        res.set('X-Cache', result.cache).json(result);
+    } catch (error) { next(error); }
+});
+router.post('/water_balance/page', limitOutorgaPages, async function(req, res, next) {
+    const controller = new AbortController();
+    const disconnect = () => { if (!res.writableEnded) controller.abort(); };
+    res.on('close', disconnect);
+    try { res.json(await progressiveWaterBalance.page(req.body || {}, controller.signal)); }
+    catch (error) {
+        if (res.destroyed) return;
+        if (error.status === 429) res.set('Retry-After', error.retryAfter || '60');
+        if (error.status) return res.status(error.status).json({ error: error.message });
+        next(error);
+    } finally { res.off('close', disconnect); }
+});
+router.post('/water_balance/complete', limitCoordinateRequests, function(req, res, next) {
+    try {
+        const geometry = waterBalanceGeometry(req.body?.geometry);
+        res.json(progressiveWaterBalance.complete(geometry, req.body));
+    } catch (error) {
+        if (error.status) return res.status(error.status).json({ error: error.message });
+        next(error);
+    }
+});
+router.post('/water_balance', limitCoordinateRequests, function(req, res, next) {
+    async function run() {
+        const input = req.body && req.body.geometry;
+        if (countCoordinates(input && input.geometry && input.geometry.coordinates) > 100000) {
+            return res.status(413).json({ error: 'A geometria excede 100 mil coordenadas para consultar outorgas.' });
+        }
+        const validated = validateBasinGeometry(input, { allowOfficialBasin: true });
+        const [natural, result] = await Promise.all([
+            calculateGeometry(validated.geometry, { includeElevation: false }),
+            queryWaterBalance(validated.geometry)
+        ]);
+        const reference = { method: 'DAEE (1988)', area_km2: natural.area_km2,
+            avg_discharge: natural.avg_discharge, q95: natural.q95, q710: natural.q710 };
+        res.set('X-Cache', result.cache);
+        res.json({ ...result.value, reference,
+            commitment: calculateCommitment(result.value, reference),
+            selection: req.body.selection === 'drawn-geometry' ? 'drawn-geometry' : 'calculated-geometry'
+        });
+    }
+    run().catch(error => {
+        if (error.status === 502) return res.status(502).json({ error: error.message });
+        next(error);
+    });
+});
+
 router.post('/geometry_calculate', limitCoordinateRequests, function(req, res, next) {
     async function run() {
         const validated = validateBasinGeometry(req.body && req.body.geometry, { allowOfficialBasin: true });
         const response = await calculateGeometry(validated.geometry, { source: 'drawn-geometry', includeElevation: false, includeBasinOverlaps: true, includeIntersectingStreams: true });
+        response.ottobacia = geometryProof.sign(response.ottobacia);
         response.calculation_memorial = calculationMemorial(response);
         res.status(200).json(response);
     }
@@ -1202,6 +1098,20 @@ router.post('/geometry_calculate', limitCoordinateRequests, function(req, res, n
 });
 
 const delineateDem = require('../services/dem-delineation').createDelineator();
+// Partition the exact final selection, including its point cut and upstream branches.
+router.post('/microbasins', limitCoordinateRequests, async function(req, res, next) {
+    const area = Number(req.body?.min_drainage_area_km2 ?? process.env.DEM_MIN_DRAINAGE_AREA_KM2 ?? 0.1);
+    if (!Number.isFinite(area) || area <= 0) return res.status(400).json({ error: 'min_drainage_area_km2 deve ser positivo.' });
+    try {
+        const { geometry } = validateBasinGeometry(req.body?.geometry, { allowOfficialBasin: true });
+        const result = await delineateDem.microbasins(geometry, area, { scope: 'calculated_basin' });
+        res.set('X-Cache', result.cache).json(result.value);
+    } catch (error) {
+        if (error.status) return res.status(error.status).json({ error: error.message });
+        next(error);
+    }
+});
+
 router.get('/ottobacias/:cod/microbasins', limitCoordinateRequests, async function(req,res,next) {
     const area = Number(req.query.min_drainage_area_km2 === undefined ? (process.env.DEM_MIN_DRAINAGE_AREA_KM2 || 0.1) : req.query.min_drainage_area_km2);
     if (!Number.isFinite(area) || area <= 0) return res.status(400).json({error:'min_drainage_area_km2 deve ser positivo.'});
@@ -1241,11 +1151,11 @@ router.get('/coords_join/:lat/:lon', limitCoordinateRequests, function(req,res,n
         const includeTopography = !(req.query.include_topography === 'false' || req.query.include_topography === '0');
         const partialBasin = !(req.query.partial_basin === 'false' || req.query.partial_basin === '0');
 
-        const cacheKey = `${lat},${lon},dem-nearest:${process.env.DEM_MIN_DRAINAGE_AREA_KM2 || 0.1},${includeTopography ? 'topo' : 'no-topo'},${includeUpstream ? 'up' : 'single'},${partialBasin ? 'part' : 'full'}`;
+        const cacheKey = `${lat},${lon},dem-final-topography-v2:${process.env.DEM_MIN_DRAINAGE_AREA_KM2 || 0.1},${includeTopography ? 'topo' : 'no-topo'},${includeUpstream ? 'up' : 'single'},${partialBasin ? 'part' : 'full'}`;
         const cached = coordinateCache.get(cacheKey);
-        if (cached && Date.now() - cached.createdAt < CACHE_TTL_MS) {
+        if (cached) {
             res.set('X-Cache', 'HIT');
-            return res.status(200).json(cached.value);
+            return res.status(200).json(cached);
         }
 
         debug('Coordinates: %s <> %s', lat, lon);
@@ -1302,24 +1212,17 @@ router.get('/coords_join/:lat/:lon', limitCoordinateRequests, function(req,res,n
         const fullBasinAreaKm2 = turf.area(ottobacia_obj) / 1000000;
         let demResult = null;
         let topographyResult = null;
+        const demWorkStartedAt = Date.now();
         if (partialBasin) {
             try {
                 demResult = await delineateDem(ottobacia_obj, [lon, lat], ottotrechosByBasin[startBasinCode] || [],
-                    (upstreamCodesByJusante[startBasinCode] || []).map(code => ottobaciasByCode[code]).filter(Boolean), { includeTopography });
-                topographyResult = demResult;
+                    (upstreamCodesByJusante[startBasinCode] || []).map(code => ottobaciasByCode[code]).filter(Boolean), { includeTopography: false });
             } catch (error) {
                 if (error.status) return res.status(error.status).json({ error: error.message });
                 throw error;
             }
             upstreamBasinCodes = [...new Set(demResult.contributing_upstream_codes.flatMap(code =>
                 [code, ...collectUpstreamBasinCodes(code)]))].filter(code => code !== startBasinCode);
-        }
-        if (!partialBasin && includeTopography) {
-            try {
-                topographyResult = await delineateDem.topography(ottobacia_obj);
-            } catch (error) {
-                topographyResult = { topography: null, topography_warning: error.message };
-            }
         }
         const localBasin = demResult ? { ...demResult.contributing_area,
             properties: { ...ottobacia_obj.properties, is_upstream_subbasin: true, delineation_method: demResult.method }
@@ -1392,6 +1295,15 @@ router.get('/coords_join/:lat/:lon', limitCoordinateRequests, function(req,res,n
                 upstream_basin_codes: [startBasinCode, ...upstreamBasinCodes]
             });
             ottobacia_full_obj = turf.featureCollection(fullFeatures);
+        }
+
+        if (includeTopography) {
+            try {
+                const remainingMs = 8500 - (Date.now() - demWorkStartedAt);
+                topographyResult = await delineateDem.topography(ottobacia_obj, { timeoutMs: remainingMs, validateD8: partialBasin });
+            } catch (error) {
+                topographyResult = { topography: null, topography_warning: error.message };
+            }
         }
 
         const totalAreaProportion = totalFullAreaKm2 > 0 ? Math.min(totalUpstreamAreaKm2 / totalFullAreaKm2, 1) : 1;
@@ -1485,12 +1397,10 @@ router.get('/coords_join/:lat/:lon', limitCoordinateRequests, function(req,res,n
             qmin: qmin_calc
         };
 
+        response.ottobacia = geometryProof.sign(response.ottobacia);
         response.calculation_memorial = calculationMemorial(response);
-        coordinateCache.set(cacheKey, { createdAt: Date.now(), value: response });
-        if (coordinateCache.size > 500) {
-            const oldestKey = coordinateCache.keys().next().value;
-            coordinateCache.delete(oldestKey);
-        }
+        // Transient visual failures must be retryable without waiting for the TTL.
+        if (!response.topography_warning && !response.topography?.contours_warning) coordinateCache.set(cacheKey, response);
         res.set('X-Cache', 'MISS');
         res.status(200).json(response)
     }

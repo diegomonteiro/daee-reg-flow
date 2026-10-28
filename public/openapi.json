@@ -2,7 +2,7 @@
   "openapi": "3.0.3",
   "info": {
     "title": "SP-ÁGUAS | REG-FLOW — API de Regionalização Hidrológica",
-    "version": "1.5.0",
+    "version": "1.9.1",
     "description": "API RESTful do sistema **REG-FLOW** para regionalização hidrológica de vazões médias, mínimas ($Q_{7,10}$, $Q_{d,T}$), curvas de permanência ($Q_{95\\%}$), simulação de isoietas e cálculo de **Volume de Regularização Intra-Anual ($V_c$ e $d_c$)** no Estado de São Paulo, fundamentada na metodologia oficial do DAEE (1988) — *Regionalização Hidrológica no Estado de São Paulo* (Revista Águas e Energia Elétrica, Ano 5, nº 14).",
     "contact": {
       "name": "SP-ÁGUAS / Equipe Técnica REG-FLOW"
@@ -69,7 +69,7 @@
           "Consulta Espacial e Bacias"
         ],
         "summary": "Calcula a regionalização hidrológica completa a partir de coordenadas (lat/lon)",
-        "description": "Localiza a ottobacia e, com partial_basin=true (padrão), delimita por MDE D8 a área contribuinte ao exutório ajustado à célula de drenagem mais próxima em toda a ottobacia, sem raio máximo. A rede usa área contribuinte mínima configurável (DEM_MIN_DRAINAGE_AREA_KM2, padrão 0,1 km²). Com include_upstream=true, inclui apenas ramos cuja entrada D8 alcança a área selecionada. partial_basin=false preserva a ottobacia inteira e a árvore COBACIAJUS. Coeficientes e vazões DAEE usam a geometria resultante. Requer rasters/Python nas consultas parciais; sem fallback para corte reto. Cache por coordenadas exatas e parâmetros (15 min), rate limit 30/min/IP. A visualização topográfica é independente do cálculo parcial: include_topography=true (padrão) também permite a imagem da ottobacia inteira; uma falha de renderização nesse modo não impede o cálculo integral.",
+        "description": "Localiza a ottobacia e, com partial_basin=true (padrão), delimita por MDE D8 a área contribuinte ao exutório ajustado à célula de drenagem mais próxima em toda a ottobacia, sem raio máximo. A rede usa área contribuinte mínima configurável (DEM_MIN_DRAINAGE_AREA_KM2, padrão 0,1 km²). Com include_upstream=true, inclui apenas ramos cuja entrada D8 alcança a área selecionada. partial_basin=false preserva a ottobacia inteira e a árvore COBACIAJUS. Coeficientes e vazões DAEE usam a geometria resultante. Requer rasters/Python nas consultas parciais; sem fallback para corte reto. Cache por coordenadas exatas e parâmetros (15 min), rate limit 30/min/IP. A visualização topográfica é independente do cálculo parcial: include_topography=true (padrão) renderiza a geometria final após o recorte e a agregação a montante, também no modo de ottobacia inteira. Uma falha visual não impede o cálculo hidrológico; o orçamento de 8,5 s é compartilhado entre D8 e topografia. Cache LRU serializado: até 32 MiB no total, 8 MiB por entrada e 128 entradas; resultados com falha visual transitória não são armazenados. O polígono final inclui uma prova opaca para sua reutilização nas simulações.",
         "parameters": [
           {
             "name": "lat",
@@ -183,11 +183,319 @@
         }
       }
     },
+    "/api/water_balance": {
+      "post": {
+        "tags": [
+          "Consulta Espacial e Bacias"
+        ],
+        "summary": "Consulta oferta natural e usos outorgados na geometria final",
+        "description": "Consulta WFS 2.0.0 sibh:outorgas em todas as páginas da BBOX e filtra os pontos pelo Polygon/MultiPolygon, incluindo bordas e excluindo interiores dos vazios. Soma separadamente captações superficiais, lançamentos, captações subterrâneas e outros usos com STATUS_POR Não Vencida (normalizado) ou Dispensado. Sem filtro de publicação. VOLUME_ANU em m³/ano dividido por 31536000 gera vazão equivalente anual; Vazão_ins em m³/s é independente. Calcula commitment com 100 × (soma de Vazão_ins das captações superficiais − soma dos lançamentos superficiais) / cada referência natural. Não usa o equivalente anual nesse percentual, mantém valores negativos e acima de 100%, exclui subterrâneas e sinaliza resultados parciais/indisponíveis. Vazões naturais DAEE são recalculadas no servidor. Valores ausentes não viram zero. Falha/truncamento da paginação gera 502, sem resultado parcial de consulta. Cache dos dados de outorgas por 5 minutos, até quatro geometrias; fonte externa mutável sem garantia de snapshot transacional. Rate limit 30/min/IP. Metadados não alteram parâmetros hidrológicos oficiais. Exceções espaciais para resultados complexos exigem geometria oficial idêntica ou prova _regflow_geometry_token válida; flags de montante não dispensam validação.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "geometry"
+                ],
+                "properties": {
+                  "geometry": {
+                    "$ref": "#/components/schemas/GeoJSONFeatureOrGeometry",
+                    "description": "Feição GeoJSON Polygon/MultiPolygon final usada no cálculo; mesmos critérios de geometry_calculate. Máximo 2 MB; 5000 coordenadas no desenho, até 100000 no caminho de geometria oficial reconhecida."
+                  },
+                  "selection": {
+                    "type": "string",
+                    "enum": [
+                      "drawn-geometry",
+                      "calculated-geometry"
+                    ],
+                    "description": "Descrição da origem; não altera a seleção espacial ou os cálculos."
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Consulta completa ao WFS; verificar accounting_complete e os contadores de valores ausentes antes de interpretar totais.",
+            "headers": {
+              "X-Cache": {
+                "schema": {
+                  "type": "string",
+                  "enum": [
+                    "HIT",
+                    "MISS"
+                  ]
+                },
+                "description": "Cache das outorgas; vazões naturais são recalculadas."
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WaterBalanceResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Geometria inválida."
+          },
+          "413": {
+            "description": "Limite de corpo ou de vértices excedido."
+          },
+          "422": {
+            "description": "Geometria inválida, fora do estado ou sem cobertura regional válida."
+          },
+          "429": {
+            "description": "Limite por cliente excedido."
+          },
+          "502": {
+            "description": "WFS indisponível, limite de 8 segundos/10000 registros/3 MB excedido, paginação inconsistente ou contagem não verificável. Nenhum resultado completo é devolvido."
+          }
+        }
+      }
+    },
+    "/api/water_balance/start": {
+      "post": {
+        "tags": [
+          "Consulta Espacial e Bacias"
+        ],
+        "summary": "Prepara carregamento espacial de outorgas",
+        "description": "Recalcula referências naturais e assina um plano de setores de aproximadamente 1 km², intersectando a geometria final. Grade adaptada até 4096 células para áreas grandes. Sem WFS nesta etapa. Plano válido 30 minutos. Cache completo HIT retorna result em vez de plan. Máximo 2 MiB e 100000 coordenadas, mesmas provas/validações da consulta legada. 30/min/IP.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "geometry"
+                ],
+                "properties": {
+                  "geometry": {
+                    "$ref": "#/components/schemas/GeoJSONFeatureOrGeometry"
+                  },
+                  "selection": {
+                    "type": "string",
+                    "enum": [
+                      "drawn-geometry",
+                      "calculated-geometry"
+                    ]
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Etapa concluída.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WaterBalanceStartResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Entrada ou comprovante inválido."
+          },
+          "410": {
+            "description": "Plano expirado; reiniciar consulta."
+          },
+          "413": {
+            "description": "Corpo excedido."
+          },
+          "422": {
+            "description": "Limites excedidos ou etapas pendentes."
+          },
+          "429": {
+            "description": "Limite por IP ou WFS; cliente suspende as chamadas e retoma automaticamente após Retry-After, preservando as etapas carregadas.",
+            "headers": {
+              "Retry-After": {
+                "description": "Segundos restantes da janela local ou valor repassado pelo WFS (segundos ou HTTP-date). Na ausência de valor remoto, 60 segundos.",
+                "schema": { "type": "string" }
+              }
+            }
+          },
+          "502": {
+            "description": "Falha/timeout da etapa WFS; repetir ou subdividir o lote."
+          }
+        }
+      }
+    },
+    "/api/water_balance/page": {
+      "post": {
+        "tags": [
+          "Consulta Espacial e Bacias"
+        ],
+        "summary": "Carrega uma página WFS de até oito setores",
+        "description": "Plano e geometria devem corresponder. Um GetFeature WFS 2.0.0 com OR de BBOXs CRS:84, count=500, orçamento independente de 8 s e corpo remoto até 4 MiB. start_index cresce pela quantidade efetiva; após a primeira página enviar previous. Retorna recibo assinado e preview normalizado. Validar todas as páginas antes de usar totais. Máximo 2 MiB por requisição; 180/min/IP. Cliente usa até duas requisições simultâneas, espaçadas em pelo menos 400 ms, e reduz lotes em falhas 502. HTTP 429 é preservado com Retry-After: cooldown compartilhado entre as chamadas, sem subdivisão nem descarte de etapas e sem consumir o limite de tentativas transitórias.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "geometry",
+                  "plan",
+                  "cells"
+                ],
+                "properties": {
+                  "geometry": {
+                    "$ref": "#/components/schemas/GeoJSONFeatureOrGeometry"
+                  },
+                  "plan": {
+                    "$ref": "#/components/schemas/WaterBalancePlan"
+                  },
+                  "cells": {
+                    "type": "array",
+                    "items": {
+                      "type": "integer",
+                      "minimum": 0
+                    },
+                    "minItems": 1,
+                    "maxItems": 8,
+                    "uniqueItems": true
+                  },
+                  "start_index": {
+                    "type": "integer",
+                    "minimum": 0
+                  },
+                  "previous": {
+                    "$ref": "#/components/schemas/WaterBalanceReceipt"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Etapa concluída.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WaterBalancePageResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Entrada ou comprovante inválido."
+          },
+          "410": {
+            "description": "Plano expirado; reiniciar consulta."
+          },
+          "413": {
+            "description": "Corpo excedido."
+          },
+          "422": {
+            "description": "Limites excedidos ou etapas pendentes."
+          },
+          "429": {
+            "description": "Limite por IP ou WFS; cliente suspende as chamadas e retoma automaticamente após Retry-After, preservando as etapas carregadas.",
+            "headers": {
+              "Retry-After": {
+                "description": "Segundos restantes da janela local ou valor repassado pelo WFS (segundos ou HTTP-date). Na ausência de valor remoto, 60 segundos.",
+                "schema": { "type": "string" }
+              }
+            }
+          },
+          "502": {
+            "description": "Falha/timeout da etapa WFS; repetir ou subdividir o lote."
+          }
+        }
+      }
+    },
+    "/api/water_balance/complete": {
+      "post": {
+        "tags": [
+          "Consulta Espacial e Bacias"
+        ],
+        "summary": "Confere etapas e calcula balanço completo",
+        "description": "Verifica assinaturas, geometria, cobertura de todos os setores, páginas contíguas, contagens e unicidade dos FIDs. Duplicatas idênticas entre setores de borda são contadas uma vez; valores divergentes exigem reinício. Referências naturais vêm do plano assinado, sem confiar em vazões enviadas pelo cliente. Filtro exato, status e contas preservados. Sem chamadas WFS. Máximo 8 MiB no corpo, 10000 FIDs únicos, 3 MiB de resultado; cache de 5 min. Progresso só deve atingir 100% após esta resposta. 30/min/IP.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "geometry",
+                  "plan",
+                  "receipts"
+                ],
+                "properties": {
+                  "geometry": {
+                    "$ref": "#/components/schemas/GeoJSONFeatureOrGeometry"
+                  },
+                  "plan": {
+                    "$ref": "#/components/schemas/WaterBalancePlan"
+                  },
+                  "receipts": {
+                    "type": "array",
+                    "items": {
+                      "$ref": "#/components/schemas/WaterBalanceReceipt"
+                    },
+                    "maxItems": 20000
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Etapa concluída.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WaterBalanceResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Entrada ou comprovante inválido."
+          },
+          "410": {
+            "description": "Plano expirado; reiniciar consulta."
+          },
+          "413": {
+            "description": "Corpo excedido."
+          },
+          "422": {
+            "description": "Limites excedidos ou etapas pendentes."
+          },
+          "429": {
+            "description": "Limite por IP ou WFS; cliente suspende as chamadas e retoma automaticamente após Retry-After, preservando as etapas carregadas.",
+            "headers": {
+              "Retry-After": {
+                "description": "Segundos restantes da janela local ou valor repassado pelo WFS (segundos ou HTTP-date). Na ausência de valor remoto, 60 segundos.",
+                "schema": { "type": "string" }
+              }
+            }
+          },
+          "502": {
+            "description": "Falha/timeout da etapa WFS; repetir ou subdividir o lote."
+          },
+          "409": {
+            "description": "Fonte inconsistente entre etapas; reiniciar carregamento."
+          }
+        }
+      }
+    },
     "/api/geometry_calculate": {
       "post": {
         "tags": ["Consulta Espacial e Bacias"],
         "summary": "Calcula a regionalização hidrológica a partir de um polígono GeoJSON desenhado",
-        "description": "Recebe uma feição ou geometria GeoJSON (`Polygon` ou `MultiPolygon`, até 5.000 vértices, sem autointerseções e contida no Estado de São Paulo), calcula área, precipitação média ponderada, coeficientes regionais ponderados (`RAU` e `RXYZ`), vazões ($\\overline{Q}$, $Q_{95\\%}$, $Q_{7,10}$) e a lista detalhada de ottobacias oficiais intersectadas pelo polígono. Retorna em `ottotrecho` todos os trechos oficiais que intersectam o desenho, com geometria integral (sem recorte), extensão oficial e pontos de montante/jusante para conferência. A seleção é espacial, sem agregação automática a montante.",
+        "description": "Recebe uma feição ou geometria GeoJSON (`Polygon` ou `MultiPolygon`, até 5.000 vértices, sem autointerseções e contida no Estado de São Paulo), calcula área, precipitação média ponderada, coeficientes regionais ponderados (`RAU` e `RXYZ`), vazões ($\\overline{Q}$, $Q_{95\\%}$, $Q_{7,10}$) e a lista detalhada de ottobacias oficiais intersectadas pelo polígono. Retorna em `ottotrecho` todos os trechos oficiais que intersectam o desenho, com geometria integral (sem recorte), extensão oficial e pontos de montante/jusante para conferência. A seleção é espacial, sem agregação automática a montante. Metadados não alteram parâmetros hidrológicos oficiais. Exceções espaciais para resultados complexos exigem geometria oficial idêntica ou prova _regflow_geometry_token válida; flags de montante não dispensam validação.",
         "requestBody": {
           "required": true,
           "content": {
@@ -215,6 +523,9 @@
             }
           },
           "400": { "description": "Geometria inválida ou fora do Estado de São Paulo." },
+          "413": {
+            "description": "Limite de corpo ou de vértices excedido."
+          },
           "422": { "description": "Polígono contém autointerseções ou não cobre regiões válidas." }
         }
       }
@@ -337,8 +648,12 @@
         },
         "responses": {
           "200": { "description": "FeatureCollection GeoJSON das faixas de precipitação recortadas para a bacia." },
-          "404": { "description": "Camada de isoietas não encontrada." }
-        }
+          "404": { "description": "Camada de isoietas não encontrada." },
+          "413": {
+            "description": "Limite de corpo ou de vértices excedido."
+          }
+        },
+        "description": " Metadados não alteram parâmetros hidrológicos oficiais. Exceções espaciais para resultados complexos exigem geometria oficial idêntica ou prova _regflow_geometry_token válida; flags de montante não dispensam validação."
       }
     },
     "/api/isohyet_adjust": {
@@ -372,7 +687,7 @@
       "post": {
         "tags": ["Simulação e Editor de Isoietas"],
         "summary": "Executa a simulação comparativa de 1 a 6 cenários de isoietas sobre a bacia",
-        "description": "Mantém constantes a geometria da bacia e os coeficientes `RAU`/`RXYZ` e recalcula precipitação média ponderada, vazão média plurianual, $Q_{95\\%}$ e $Q_{7,10}$ para cada camada de isoietas (suporta payload JSON ou compactado com `Content-Encoding: gzip` até 60 MB descompactado). Cada cenário deve cobrir ao menos 95% da área de referência da bacia.",
+        "description": "Mantém constantes a geometria da bacia e os coeficientes `RAU`/`RXYZ` e recalcula precipitação média ponderada, vazão média plurianual, $Q_{95\\%}$ e $Q_{7,10}$ para cada camada de isoietas (suporta payload JSON ou compactado com `Content-Encoding: gzip` até 60 MB descompactado). Cada cenário deve cobrir ao menos 95% da área de referência da bacia. Metadados não alteram parâmetros hidrológicos oficiais. Exceções espaciais para resultados complexos exigem geometria oficial idêntica ou prova _regflow_geometry_token válida; flags de montante não dispensam validação. Cobertura usa área da união das faixas recortadas; sobreposições significativas são rejeitadas com 422, inclusive faixas duplicadas com a mesma precipitação.",
         "requestBody": {
           "required": true,
           "content": {
@@ -404,6 +719,9 @@
         "responses": {
           "200": { "description": "Resultados comparativos de vazão por cenário de isoietas." },
           "400": { "description": "Requisição inválida." },
+          "413": {
+            "description": "Limite de corpo ou de vértices excedido."
+          },
           "422": { "description": "Cobertura espacial da camada de isoietas inferior a 95% da bacia." }
         }
       }
@@ -414,12 +732,50 @@
         "summary": "Calcula a vazão média plurianual (Equação 1 do DAEE)",
         "parameters": [
           { "name": "coef_a", "in": "path", "required": true, "schema": { "type": "number", "example": -29.47 }, "description": "Parâmetro linear `a` (`A_MEDIA`) da regressão chuva-vazão." },
-          { "name": "coef_b", "in": "path", "required": true, "schema": { "type": "number", "example": 0.0315 }, "schema": { "type": "number", "example": 0.0315 }, "description": "Parâmetro angular `b` (`B_MEDIA`) da regressão chuva-vazão." },
-          { "name": "avg_rainfall", "in": "path", "required": true, "schema": { "type": "number", "example": 1685 }, "description": "Precipitação média anual na bacia (mm/ano)." },
-          { "name": "area_km2", "in": "path", "required": true, "schema": { "type": "number", "example": 401.5 }, "description": "Área de drenagem da bacia (km²)." }
+          {
+            "name": "coef_b",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "number",
+              "example": 0.0315,
+              "minimum": 0,
+              "exclusiveMinimum": true
+            },
+            "description": "Parâmetro angular `b` (`B_MEDIA`) da regressão chuva-vazão."
+          },
+          {
+            "name": "avg_rainfall",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "number",
+              "example": 1685,
+              "minimum": 0
+            },
+            "description": "Precipitação média anual na bacia (mm/ano)."
+          },
+          {
+            "name": "area_km2",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "number",
+              "example": 401.5,
+              "minimum": 0,
+              "exclusiveMinimum": true
+            },
+            "description": "Área de drenagem da bacia (km²)."
+          }
         ],
         "responses": {
-          "200": { "description": "Vazão média em L/s e m³/s." }
+          "200": { "description": "Vazão média em L/s e m³/s." },
+          "400": {
+            "description": "Parâmetro inválido: domínio físico, índice ou quantidade de meses fora dos limites."
+          },
+          "422": {
+            "description": "Resultado não finito ou denominador nulo; parâmetros fora do domínio numérico do cálculo."
+          }
         }
       }
     },
@@ -429,11 +785,38 @@
         "summary": "Calcula a vazão Q95% para uma região hidrográfica (Equação 18 do DAEE)",
         "parameters": [
           { "name": "region", "in": "path", "required": true, "schema": { "type": "string", "example": "h" }, "description": "Código da região hidrográfica (`a` a `u`)." },
-          { "name": "qls_m3s", "in": "path", "required": true, "schema": { "type": "number", "example": 9.48 }, "description": "Vazão média plurianual (m³/s)." },
-          { "name": "area_km2", "in": "path", "required": true, "schema": { "type": "number", "example": 401.5 }, "description": "Área da bacia (km²)." }
+          {
+            "name": "qls_m3s",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "number",
+              "example": 9.48,
+              "minimum": 0
+            },
+            "description": "Vazão média plurianual (m³/s)."
+          },
+          {
+            "name": "area_km2",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "number",
+              "example": 401.5,
+              "minimum": 0,
+              "exclusiveMinimum": true
+            },
+            "description": "Área da bacia (km²)."
+          }
         ],
         "responses": {
-          "200": { "description": "Vazão Q95% calculada." }
+          "200": { "description": "Vazão Q95% calculada." },
+          "400": {
+            "description": "Parâmetro inválido: domínio físico, índice ou quantidade de meses fora dos limites."
+          },
+          "422": {
+            "description": "Resultado não finito ou denominador nulo; parâmetros fora do domínio numérico do cálculo."
+          }
         }
       }
     },
@@ -443,10 +826,25 @@
         "summary": "Calcula a curva de permanência completa (5% a 100%) para uma região hidrográfica",
         "parameters": [
           { "name": "region", "in": "path", "required": true, "schema": { "type": "string", "example": "h" } },
-          { "name": "qls_m3s", "in": "path", "required": true, "schema": { "type": "number", "example": 9.48 } }
+          {
+            "name": "qls_m3s",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "number",
+              "example": 9.48,
+              "minimum": 0
+            }
+          }
         ],
         "responses": {
-          "200": { "description": "Vetor de vazões da curva de permanência." }
+          "200": { "description": "Vetor de vazões da curva de permanência." },
+          "400": {
+            "description": "Parâmetro inválido: domínio físico, índice ou quantidade de meses fora dos limites."
+          },
+          "422": {
+            "description": "Resultado não finito ou denominador nulo; parâmetros fora do domínio numérico do cálculo."
+          }
         }
       }
     },
@@ -456,13 +854,58 @@
         "summary": "Calcula a vazão mínima de 7 dias e 10 anos de retorno (Q7,10 — Equação 22 do DAEE)",
         "parameters": [
           { "name": "region", "in": "path", "required": true, "schema": { "type": "string", "example": "h" } },
-          { "name": "c", "in": "path", "required": true, "schema": { "type": "number", "example": 0.85 } },
-          { "name": "val_a", "in": "path", "required": true, "schema": { "type": "number", "example": 0.4951 } },
-          { "name": "val_b", "in": "path", "required": true, "schema": { "type": "number", "example": 0.0279 } },
-          { "name": "qls_m3s", "in": "path", "required": true, "schema": { "type": "number", "example": 9.48 } }
+          {
+            "name": "c",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "number",
+              "example": 0.85,
+              "minimum": 0,
+              "exclusiveMinimum": true
+            }
+          },
+          {
+            "name": "val_a",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "number",
+              "example": 0.4951,
+              "minimum": 0,
+              "exclusiveMinimum": true
+            }
+          },
+          {
+            "name": "val_b",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "number",
+              "example": 0.0279,
+              "minimum": 0,
+              "exclusiveMinimum": true
+            }
+          },
+          {
+            "name": "qls_m3s",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "number",
+              "example": 9.48,
+              "minimum": 0
+            }
+          }
         ],
         "responses": {
-          "200": { "description": "Valor de Q7,10 em m³/s." }
+          "200": { "description": "Valor de Q7,10 em m³/s." },
+          "400": {
+            "description": "Parâmetro inválido: domínio físico, índice ou quantidade de meses fora dos limites."
+          },
+          "422": {
+            "description": "Resultado não finito ou denominador nulo; parâmetros fora do domínio numérico do cálculo."
+          }
         }
       }
     },
@@ -472,14 +915,69 @@
         "summary": "Calcula Q7,T para os períodos de retorno de 10, 15, 20, 25, 50 e 100 anos",
         "parameters": [
           { "name": "region", "in": "path", "required": true, "schema": { "type": "string", "example": "h" } },
-          { "name": "c", "in": "path", "required": true, "schema": { "type": "number", "example": 0.85 } },
-          { "name": "val_a", "in": "path", "required": true, "schema": { "type": "number", "example": 0.4951 } },
-          { "name": "val_b", "in": "path", "required": true, "schema": { "type": "number", "example": 0.0279 } },
-          { "name": "qls_m3s", "in": "path", "required": true, "schema": { "type": "number", "example": 9.48 } },
-          { "name": "area_km2", "in": "path", "required": true, "schema": { "type": "number", "example": 401.5 } }
+          {
+            "name": "c",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "number",
+              "example": 0.85,
+              "minimum": 0,
+              "exclusiveMinimum": true
+            }
+          },
+          {
+            "name": "val_a",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "number",
+              "example": 0.4951,
+              "minimum": 0,
+              "exclusiveMinimum": true
+            }
+          },
+          {
+            "name": "val_b",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "number",
+              "example": 0.0279,
+              "minimum": 0,
+              "exclusiveMinimum": true
+            }
+          },
+          {
+            "name": "qls_m3s",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "number",
+              "example": 9.48,
+              "minimum": 0
+            }
+          },
+          {
+            "name": "area_km2",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "number",
+              "example": 401.5,
+              "minimum": 0,
+              "exclusiveMinimum": true
+            }
+          }
         ],
         "responses": {
-          "200": { "description": "Série de vazões mínimas de 7 dias por período de retorno." }
+          "200": { "description": "Série de vazões mínimas de 7 dias por período de retorno." },
+          "400": {
+            "description": "Parâmetro inválido: domínio físico, índice ou quantidade de meses fora dos limites."
+          },
+          "422": {
+            "description": "Resultado não finito ou denominador nulo; parâmetros fora do domínio numérico do cálculo."
+          }
         }
       }
     },
@@ -490,13 +988,47 @@
         "parameters": [
           { "name": "region", "in": "path", "required": true, "schema": { "type": "string", "example": "h" } },
           { "name": "time", "in": "path", "required": true, "schema": { "type": "integer", "minimum": 0, "maximum": 5, "example": 0 }, "description": "Índice do período de retorno (0->10a, 1->15a, 2->20a, 3->25a, 4->50a, 5->100a)." },
-          { "name": "a", "in": "path", "required": true, "schema": { "type": "number", "example": 0.4951 } },
-          { "name": "b", "in": "path", "required": true, "schema": { "type": "number", "example": 0.0279 } },
+          {
+            "name": "a",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "number",
+              "example": 0.4951,
+              "minimum": 0
+            }
+          },
+          {
+            "name": "b",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "number",
+              "example": 0.0279,
+              "minimum": 0,
+              "exclusiveMinimum": true
+            }
+          },
           { "name": "dmonth", "in": "path", "required": true, "schema": { "type": "integer", "minimum": 1, "maximum": 12, "example": 1 } },
-          { "name": "qls_m3s", "in": "path", "required": true, "schema": { "type": "number", "example": 9.48 } }
+          {
+            "name": "qls_m3s",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "number",
+              "example": 9.48,
+              "minimum": 0
+            }
+          }
         ],
         "responses": {
-          "200": { "description": "Vazão mínima mensal Qd,T." }
+          "200": { "description": "Vazão mínima mensal Qd,T." },
+          "400": {
+            "description": "Parâmetro inválido: domínio físico, índice ou quantidade de meses fora dos limites."
+          },
+          "422": {
+            "description": "Resultado não finito ou denominador nulo; parâmetros fora do domínio numérico do cálculo."
+          }
         }
       }
     },
@@ -505,14 +1037,67 @@
         "tags": ["Cálculos Hidrológicos Diretos"],
         "summary": "Calcula a duração crítica dc em meses informando XT diretamente (Equação 15 do DAEE)",
         "parameters": [
-          { "name": "qf", "in": "path", "required": true, "schema": { "type": "number", "example": 5.0 } },
-          { "name": "xt", "in": "path", "required": true, "schema": { "type": "number", "example": 0.748 } },
-          { "name": "a", "in": "path", "required": true, "schema": { "type": "number", "example": 0.4951 } },
-          { "name": "b", "in": "path", "required": true, "schema": { "type": "number", "example": 0.0279 } },
-          { "name": "qls_m3s", "in": "path", "required": true, "schema": { "type": "number", "example": 9.48 } }
+          {
+            "name": "qf",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "number",
+              "example": 5.0,
+              "minimum": 0
+            }
+          },
+          {
+            "name": "xt",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "number",
+              "example": 0.748,
+              "minimum": 0,
+              "exclusiveMinimum": true
+            }
+          },
+          {
+            "name": "a",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "number",
+              "example": 0.4951,
+              "minimum": 0
+            }
+          },
+          {
+            "name": "b",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "number",
+              "example": 0.0279,
+              "minimum": 0,
+              "exclusiveMinimum": true
+            }
+          },
+          {
+            "name": "qls_m3s",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "number",
+              "example": 9.48,
+              "minimum": 0
+            }
+          }
         ],
         "responses": {
-          "200": { "description": "Duração crítica dc em meses." }
+          "200": { "description": "Duração crítica dc em meses." },
+          "400": {
+            "description": "Parâmetro inválido: domínio físico, índice ou quantidade de meses fora dos limites."
+          },
+          "422": {
+            "description": "Resultado não finito ou denominador nulo; parâmetros fora do domínio numérico do cálculo."
+          }
         }
       }
     },
@@ -523,13 +1108,56 @@
         "parameters": [
           { "name": "region", "in": "path", "required": true, "schema": { "type": "string", "example": "h" } },
           { "name": "time", "in": "path", "required": true, "schema": { "type": "integer", "minimum": 0, "maximum": 5, "example": 0 } },
-          { "name": "qf", "in": "path", "required": true, "schema": { "type": "number", "example": 5.0 } },
-          { "name": "a", "in": "path", "required": true, "schema": { "type": "number", "example": 0.4951 } },
-          { "name": "b", "in": "path", "required": true, "schema": { "type": "number", "example": 0.0279 } },
-          { "name": "qls_m3s", "in": "path", "required": true, "schema": { "type": "number", "example": 9.48 } }
+          {
+            "name": "qf",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "number",
+              "example": 5.0,
+              "minimum": 0
+            }
+          },
+          {
+            "name": "a",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "number",
+              "example": 0.4951,
+              "minimum": 0
+            }
+          },
+          {
+            "name": "b",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "number",
+              "example": 0.0279,
+              "minimum": 0,
+              "exclusiveMinimum": true
+            }
+          },
+          {
+            "name": "qls_m3s",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "number",
+              "example": 9.48,
+              "minimum": 0
+            }
+          }
         ],
         "responses": {
-          "200": { "description": "Duração crítica dc em meses." }
+          "200": { "description": "Duração crítica dc em meses." },
+          "400": {
+            "description": "Parâmetro inválido: domínio físico, índice ou quantidade de meses fora dos limites."
+          },
+          "422": {
+            "description": "Resultado não finito ou denominador nulo; parâmetros fora do domínio numérico do cálculo."
+          }
         }
       }
     },
@@ -538,16 +1166,88 @@
         "tags": ["Cálculos Hidrológicos Diretos"],
         "summary": "Calcula o volume de regularização V(d) para uma duração d específica (Equação 13 do DAEE)",
         "parameters": [
-          { "name": "qf", "in": "path", "required": true, "schema": { "type": "number", "example": 5.0 } },
-          { "name": "xt", "in": "path", "required": true, "schema": { "type": "number", "example": 0.748 } },
-          { "name": "a", "in": "path", "required": true, "schema": { "type": "number", "example": 0.4951 } },
-          { "name": "b", "in": "path", "required": true, "schema": { "type": "number", "example": 0.0279 } },
-          { "name": "d", "in": "path", "required": true, "schema": { "type": "number", "example": 3.76 } },
-          { "name": "qls_m3s", "in": "path", "required": true, "schema": { "type": "number", "example": 9.48 } },
-          { "name": "k", "in": "path", "required": true, "schema": { "type": "number", "example": 2628000 } }
+          {
+            "name": "qf",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "number",
+              "example": 5.0,
+              "minimum": 0
+            }
+          },
+          {
+            "name": "xt",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "number",
+              "example": 0.748,
+              "minimum": 0,
+              "exclusiveMinimum": true
+            }
+          },
+          {
+            "name": "a",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "number",
+              "example": 0.4951,
+              "minimum": 0
+            }
+          },
+          {
+            "name": "b",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "number",
+              "example": 0.0279,
+              "minimum": 0,
+              "exclusiveMinimum": true
+            }
+          },
+          {
+            "name": "d",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "number",
+              "example": 3.76,
+              "minimum": 0
+            }
+          },
+          {
+            "name": "qls_m3s",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "number",
+              "example": 9.48,
+              "minimum": 0
+            }
+          },
+          {
+            "name": "k",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "number",
+              "example": 2628000,
+              "minimum": 0,
+              "exclusiveMinimum": true
+            }
+          }
         ],
         "responses": {
-          "200": { "description": "Volume de regularização calculado." }
+          "200": { "description": "Volume de regularização calculado." },
+          "400": {
+            "description": "Parâmetro inválido: domínio físico, índice ou quantidade de meses fora dos limites."
+          },
+          "422": {
+            "description": "Resultado não finito ou denominador nulo; parâmetros fora do domínio numérico do cálculo."
+          }
         }
       }
     },
@@ -556,17 +1256,68 @@
         "tags": ["Cálculos Hidrológicos Diretos"],
         "summary": "Calcula o volume máximo de regularização Vc (Equação 14 do DAEE)",
         "parameters": [
-          { "name": "qf", "in": "path", "required": true, "schema": { "type": "number", "example": 5.0 } },
+          {
+            "name": "qf",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "number",
+              "example": 5.0,
+              "minimum": 0
+            }
+          },
           { "name": "region", "in": "path", "required": true, "schema": { "type": "string", "example": "h" } },
           { "name": "t", "in": "path", "required": true, "schema": { "type": "integer", "minimum": 0, "maximum": 5, "example": 0 } },
-          { "name": "a", "in": "path", "required": true, "schema": { "type": "number", "example": 0.4951 } },
-          { "name": "b", "in": "path", "required": true, "schema": { "type": "number", "example": 0.0279 } },
-          { "name": "qls_m3s", "in": "path", "required": true, "schema": { "type": "number", "example": 9.48 } },
-          { "name": "months", "in": "path", "required": true, "schema": { "type": "integer", "minimum": 1, "maximum": 12, "example": 1 } }
+          {
+            "name": "a",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "number",
+              "example": 0.4951,
+              "minimum": 0
+            }
+          },
+          {
+            "name": "b",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "number",
+              "example": 0.0279,
+              "minimum": 0,
+              "exclusiveMinimum": true
+            }
+          },
+          {
+            "name": "qls_m3s",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "number",
+              "example": 9.48,
+              "minimum": 0
+            }
+          },
+          {
+            "name": "months",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "integer", "minimum": 1, "maximum": 12, "example": 1 },
+            "deprecated": true,
+            "description": "Compatibilidade de URL: inteiro de 1 a 12, ignorado no cálculo da Equação (14)."
+          }
         ],
         "responses": {
-          "200": { "description": "Volume máximo de regularização Vc em m³." }
-        }
+          "200": { "description": "Volume máximo de regularização Vc em m³." },
+          "400": {
+            "description": "Parâmetro inválido: domínio físico, índice ou quantidade de meses fora dos limites."
+          },
+          "422": {
+            "description": "Resultado não finito ou denominador nulo; parâmetros fora do domínio numérico do cálculo."
+          }
+        },
+        "description": " Equação (14): Vc = (QF − XT·A·Q̄)² / (4·XT·B·Q̄) × K. O parâmetro legado months é validado mas ignorado; o volume máximo não é multiplicado novamente pela duração."
       }
     },
     "/api/find_coefs/{lat}/{lon}": {
@@ -633,6 +1384,77 @@
         "responses": { "200": { "description": "Lista de feições LineString/MultiLineString do ottotrecho." } }
       }
     },
+    "/api/microbasins": {
+      "post": {
+        "tags": [
+          "Consulta Espacial e Bacias"
+        ],
+        "summary": "Identifica microbacias de toda a área final calculada, incluindo o recorte e ottobacias a montante",
+        "description": "Recebe o polígono final retornado pela regionalização, preservando _regflow_geometry_token. Dissolve os polígonos adjacentes e particiona a rede D8 na máscara conjunta; os caminhos atravessam limites internos de ottobacias sem criar divisores artificiais. Respeita o corte do ponto e os ramos efetivamente agregados. Não expande automaticamente outras bacias. Limiar é área acumulada mínima para extrair a rede, não área mínima das unidades. Corpo até 2 MiB; limites de 4 milhões de células, 5000 unidades e 8,5 s, sem resultados truncados. Cache por hash da geometria, escopo, código, limiar e versão dos rasters; mesmos limites do GET por código. Rate limit de 30/min/IP.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "geometry"
+                ],
+                "properties": {
+                  "geometry": {
+                    "$ref": "#/components/schemas/GeoJSONFeatureOrGeometry"
+                  },
+                  "min_drainage_area_km2": {
+                    "type": "number",
+                    "minimum": 0,
+                            "example": 1,
+                    "description": "Limiar positivo em km². Padrão DEM_MIN_DRAINAGE_AREA_KM2 ou 0,1."
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "FeatureCollection de toda a área selecionada, com scope=calculated_basin. X-Cache HIT/MISS. Áreas em CRS projetado.",
+            "headers": {
+              "X-Cache": {
+                "schema": {
+                  "type": "string",
+                  "enum": [
+                    "HIT",
+                    "MISS"
+                  ]
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MicrobasinsResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Limiar, geometria ou coordenadas inválidos."
+          },
+          "413": {
+            "description": "Corpo ou limite de vértices excedido."
+          },
+          "422": {
+            "description": "Topologia, dados ou tamanho de processamento incompatíveis; sem resultado parcial."
+          },
+          "429": {
+            "description": "Limite de requisições."
+          },
+          "503": {
+            "description": "Rasters ausentes, serviço ocupado ou tempo excedido."
+          }
+        }
+      }
+    },
     "/api/ottobacias/{cod}/microbasins": {
       "get": {
         "tags": [
@@ -656,8 +1478,7 @@
             "schema": {
               "type": "number",
               "minimum": 0,
-              "exclusiveMinimum": true,
-              "default": 0.1
+                "default": 0.1
             },
             "description": "Área acumulada global mínima para extrair a rede; padrão DEM_MIN_DRAINAGE_AREA_KM2 ou 0,1. Não define a área mínima/fixa de cada microbacia."
           }
@@ -932,6 +1753,628 @@
   },
   "components": {
     "schemas": {
+      "MicrobasinsResponse": {
+        "type": "object",
+        "required": [
+          "type",
+          "features",
+          "metadata"
+        ],
+        "properties": {
+          "type": {
+            "type": "string",
+            "enum": [
+              "FeatureCollection"
+            ]
+          },
+          "features": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/GeoJSONBasinFeature"
+            }
+          },
+          "metadata": {
+            "type": "object",
+            "required": [
+              "scope",
+              "microbasins_count",
+              "residual_count",
+              "valid_cells",
+              "classified_cells",
+              "basin_area_km2",
+              "min_drainage_area_km2"
+            ],
+            "properties": {
+              "scope": {
+                "type": "string",
+                "enum": [
+                  "calculated_basin",
+                  "within_ottobasin"
+                ]
+              },
+              "basin_code": {
+                "type": "string",
+                "nullable": true,
+                "description": "Código da ottobacia de referência; não representa a extensão da máscara agregada."
+              },
+              "microbasins_count": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "residual_count": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "valid_cells": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "classified_cells": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "basin_area_km2": {
+                "type": "number"
+              },
+              "area_km2": {
+                "type": "number"
+              },
+              "min_drainage_area_km2": {
+                "type": "number"
+              },
+              "warnings": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              }
+            }
+          }
+        }
+      },
+      "OutorgaGroupTotals": {
+        "type": "object",
+        "description": "Somas dos registros elegíveis do grupo. Nulo quando há registros mas nenhum valor conhecido; zero quando não há registros ou todos os valores conhecidos são zero. Contadores identificam somas parciais.",
+        "properties": {
+          "count": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "annual_known_count": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "annual_missing_count": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "instantaneous_known_count": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "instantaneous_missing_count": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "annual_volume_m3": {
+            "type": "number",
+            "nullable": true
+          },
+          "annual_equivalent_m3s": {
+            "type": "number",
+            "nullable": true
+          },
+          "instantaneous_m3s": {
+            "type": "number",
+            "nullable": true
+          }
+        }
+      },
+      "WaterBalancePlan": {
+        "type": "object",
+        "required": [
+          "data",
+          "signature"
+        ],
+        "properties": {
+          "data": {
+            "type": "object",
+            "required": [
+              "kind",
+              "id",
+              "geometry_hash",
+              "grid",
+              "cells",
+              "expires_at",
+              "reference",
+              "selection",
+              "cell_area_km2"
+            ],
+            "properties": {
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "plan"
+                ]
+              },
+              "id": {
+                "type": "string"
+              },
+              "geometry_hash": {
+                "type": "string"
+              },
+              "expires_at": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "started_at": {
+                "type": "string",
+                "format": "date-time"
+              },
+              "grid": {
+                "type": "object",
+                "required": [
+                  "bounds",
+                  "columns",
+                  "rows"
+                ],
+                "properties": {
+                  "bounds": {
+                    "type": "array",
+                    "items": {
+                      "type": "number"
+                    },
+                    "minItems": 4,
+                    "maxItems": 4
+                  },
+                  "columns": {
+                    "type": "integer",
+                    "minimum": 1
+                  },
+                  "rows": {
+                    "type": "integer",
+                    "minimum": 1
+                  }
+                }
+              },
+              "cells": {
+                "type": "array",
+                "items": {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                "minItems": 1,
+                "maxItems": 4096,
+                "uniqueItems": true
+              },
+              "cell_area_km2": {
+                "type": "number",
+                    "minimum": 0
+              },
+              "reference": {
+                "type": "object",
+                "properties": {
+                  "area_km2": {
+                    "type": "number"
+                  },
+                  "avg_discharge": {
+                    "type": "number"
+                  },
+                  "q95": {
+                    "type": "number"
+                  },
+                  "q710": {
+                    "type": "number"
+                  }
+                }
+              },
+              "selection": {
+                "type": "string",
+                "enum": [
+                  "drawn-geometry",
+                  "calculated-geometry"
+                ]
+              }
+            }
+          },
+          "signature": {
+            "type": "string",
+            "pattern": "^[a-f0-9]{64}$"
+          }
+        }
+      },
+      "WaterBalanceReceipt": {
+        "type": "object",
+        "required": [
+          "data",
+          "signature"
+        ],
+        "properties": {
+          "data": {
+            "type": "object",
+            "required": [
+              "kind",
+              "plan_id",
+              "expires_at",
+              "cells",
+              "start_index",
+              "expected",
+              "next_index",
+              "complete",
+              "features"
+            ],
+            "properties": {
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "page"
+                ]
+              },
+              "plan_id": {
+                "type": "string"
+              },
+              "expires_at": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "cells": {
+                "type": "array",
+                "items": {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                "minItems": 1,
+                "maxItems": 8,
+                "uniqueItems": true
+              },
+              "start_index": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "expected": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "next_index": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "complete": {
+                "type": "boolean"
+              },
+              "features": {
+                "type": "array",
+                "items": {
+                  "type": "object"
+                },
+                "maxItems": 500
+              }
+            }
+          },
+          "signature": {
+            "type": "string",
+            "pattern": "^[a-f0-9]{64}$"
+          }
+        }
+      },
+      "WaterBalanceStartResponse": {
+        "type": "object",
+        "required": [
+          "cache"
+        ],
+        "properties": {
+          "cache": {
+            "type": "string",
+            "enum": [
+              "HIT",
+              "MISS"
+            ]
+          },
+          "plan": {
+            "$ref": "#/components/schemas/WaterBalancePlan"
+          },
+          "result": {
+            "$ref": "#/components/schemas/WaterBalanceResponse"
+          }
+        },
+        "oneOf": [
+          {
+            "required": [
+              "plan"
+            ]
+          },
+          {
+            "required": [
+              "result"
+            ]
+          }
+        ]
+      },
+      "WaterBalancePageResponse": {
+        "type": "object",
+        "required": [
+          "receipt",
+          "preview"
+        ],
+        "properties": {
+          "receipt": {
+            "$ref": "#/components/schemas/WaterBalanceReceipt"
+          },
+          "preview": {
+            "type": "array",
+            "items": {
+              "type": "object"
+            },
+            "description": "Pontos desta página dentro da geometria, normalizados para visualização parcial; não são um balanço completo."
+          }
+        }
+      },
+      "WaterBalanceResponse": {
+        "type": "object",
+        "properties": {
+          "commitment": {
+            "type": "object",
+            "description": "Comprometimento instantâneo superficial, calculado no backend depois de recalcular as referências naturais; nunca é armazenado com uma referência antiga no cache de outorgas.",
+            "properties": {
+              "basis": {
+                "type": "string",
+                "enum": [
+                  "instantaneous_surface_flow"
+                ]
+              },
+              "formula": {
+                "type": "string"
+              },
+              "withdrawals_m3s": {
+                "type": "number",
+                "nullable": true
+              },
+              "discharges_m3s": {
+                "type": "number",
+                "nullable": true
+              },
+              "net_withdrawal_m3s": {
+                "type": "number",
+                "nullable": true
+              },
+              "missing_instantaneous_count": {
+                "type": "integer"
+              },
+              "inputs_complete": {
+                "type": "boolean",
+                "description": "Consulta espacial completa e vazões instantâneas superficiais conhecidas."
+              },
+              "complete": {
+                "type": "boolean",
+                "description": "Entradas completas e todos os percentuais calculáveis."
+              },
+              "references": {
+                "type": "object",
+                "properties": {
+                  "avg_discharge": {
+                    "type": "object",
+                    "properties": {
+                      "natural_m3s": {
+                        "type": "number",
+                        "nullable": true
+                      },
+                      "percent": {
+                        "type": "number",
+                        "nullable": true,
+                        "description": "Sem limitar a 0 ou 100. Nulo se o denominador não for positivo/finito ou não houver dados para subtração."
+                      },
+                      "status": {
+                        "type": "string",
+                        "enum": [
+                          "complete",
+                          "partial",
+                          "unavailable"
+                        ]
+                      },
+                      "reason": {
+                        "type": "string",
+                        "nullable": true,
+                        "enum": [
+                          "invalid_natural_reference",
+                          "missing_instantaneous_flow",
+                          "numeric_overflow",
+                          "incomplete_source_data",
+                          null
+                        ]
+                      }
+                    }
+                  },
+                  "q95": {
+                    "type": "object",
+                    "properties": {
+                      "natural_m3s": {
+                        "type": "number",
+                        "nullable": true
+                      },
+                      "percent": {
+                        "type": "number",
+                        "nullable": true,
+                        "description": "Sem limitar a 0 ou 100. Nulo se o denominador não for positivo/finito ou não houver dados para subtração."
+                      },
+                      "status": {
+                        "type": "string",
+                        "enum": [
+                          "complete",
+                          "partial",
+                          "unavailable"
+                        ]
+                      },
+                      "reason": {
+                        "type": "string",
+                        "nullable": true,
+                        "enum": [
+                          "invalid_natural_reference",
+                          "missing_instantaneous_flow",
+                          "numeric_overflow",
+                          "incomplete_source_data",
+                          null
+                        ]
+                      }
+                    }
+                  },
+                  "q710": {
+                    "type": "object",
+                    "properties": {
+                      "natural_m3s": {
+                        "type": "number",
+                        "nullable": true
+                      },
+                      "percent": {
+                        "type": "number",
+                        "nullable": true,
+                        "description": "Sem limitar a 0 ou 100. Nulo se o denominador não for positivo/finito ou não houver dados para subtração."
+                      },
+                      "status": {
+                        "type": "string",
+                        "enum": [
+                          "complete",
+                          "partial",
+                          "unavailable"
+                        ]
+                      },
+                      "reason": {
+                        "type": "string",
+                        "nullable": true,
+                        "enum": [
+                          "invalid_natural_reference",
+                          "missing_instantaneous_flow",
+                          "numeric_overflow",
+                          "incomplete_source_data",
+                          null
+                        ]
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "complete": {
+            "type": "boolean",
+            "description": "Todas as páginas foram recuperadas e sua contagem conferida. Erros não geram 200."
+          },
+          "accounting_complete": {
+            "type": "boolean",
+            "description": "Volumes anuais das captações/lançamentos superficiais elegíveis estão completos e não há localização inválida entre os candidatos."
+          },
+          "reference": {
+            "type": "object",
+            "properties": {
+              "area_km2": {
+                "type": "number"
+              },
+              "avg_discharge": {
+                "type": "number"
+              },
+              "q95": {
+                "type": "number"
+              },
+              "q710": {
+                "type": "number"
+              }
+            }
+          },
+          "groups": {
+            "type": "object",
+            "properties": {
+              "surface_withdrawal": {
+                "$ref": "#/components/schemas/OutorgaGroupTotals"
+              },
+              "surface_discharge": {
+                "$ref": "#/components/schemas/OutorgaGroupTotals"
+              },
+              "groundwater_withdrawal": {
+                "$ref": "#/components/schemas/OutorgaGroupTotals"
+              },
+              "other": {
+                "$ref": "#/components/schemas/OutorgaGroupTotals"
+              }
+            }
+          },
+          "counts": {
+            "type": "object",
+            "properties": {
+              "bbox_records": {
+                "type": "integer"
+              },
+              "in_polygon": {
+                "type": "integer"
+              },
+              "eligible": {
+                "type": "integer"
+              },
+              "excluded_status": {
+                "type": "integer"
+              },
+              "outside_polygon": {
+                "type": "integer"
+              },
+              "invalid_geometry": {
+                "type": "integer"
+              }
+            }
+          },
+          "statuses": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "integer"
+            }
+          },
+          "seconds_per_year": {
+            "type": "integer",
+            "enum": [
+              31536000
+            ]
+          },
+          "included_statuses": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "source": {
+            "type": "object",
+            "description": "URL, camada, versão WFS, fetched_at e contagem BBOX."
+          },
+          "selection": {
+            "type": "string"
+          },
+          "area_km2": {
+            "type": "number"
+          },
+          "units": {
+            "type": "object"
+          },
+          "warnings": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "outorgas": {
+            "type": "object",
+            "description": "FeatureCollection de pontos WGS84 selecionados pelo polígono, inclusive status excluídos para auditoria. Propriedades: source_id, point_id, request_id, use_type, status, eligible, category, annual_volume_m3, annual_equivalent_m3s, instantaneous_m3s."
+          }
+        },
+        "required": [
+          "source",
+          "complete",
+          "accounting_complete",
+          "area_km2",
+          "units",
+          "groups",
+          "counts",
+          "warnings",
+          "reference",
+          "commitment",
+          "outorgas"
+        ]
+      },
       "ErrorResponse": {
         "type": "object",
         "properties": {
@@ -939,8 +2382,18 @@
         }
       },
       "GeoJSONFeatureOrGeometry": {
-        "type": "object",
-        "description": "Objeto GeoJSON Feature ou Geometry (Polygon ou MultiPolygon).",
+        "description": "Feature ou Geometry Polygon/MultiPolygon em WGS84. Até 5.000 vértices para desenhos; exceções verificáveis para geometrias oficiais ou assinadas pelo servidor, com teto de 100.000 posições. Booleanos de montante não autorizam exceções.",
+        "oneOf": [
+          {
+            "$ref": "#/components/schemas/GeoJSONBasinFeature"
+          },
+          {
+            "$ref": "#/components/schemas/GeoJSONPolygonGeometry"
+          },
+          {
+            "$ref": "#/components/schemas/GeoJSONMultiPolygonGeometry"
+          }
+        ],
         "example": {
           "type": "Feature",
           "properties": {},
@@ -1023,7 +2476,8 @@
           "scope": {
             "type": "string",
             "enum": [
-              "clicked_ottobasin"
+              "clicked_ottobasin",
+              "calculated_basin"
             ]
           },
           "source": {
@@ -1089,7 +2543,7 @@
             "example": 0.7627
           },
           "ottobacia": {
-            "type": "object"
+            "$ref": "#/components/schemas/GeoJSONBasinFeature"
           },
           "ottobacia_full": {
             "type": "object"
@@ -1166,7 +2620,18 @@
             "default": true,
             "description": "Opção de visualização do MDE independente do cálculo parcial."
           }
-        }
+        },
+        "required": [
+          "latitude",
+          "longitude",
+          "area_km2",
+          "avg_discharge",
+          "q95",
+          "q710",
+          "ottobacia",
+          "calculation_memorial",
+          "include_topography"
+        ]
       },
       "GeometryCalculateResponse": {
         "type": "object",
@@ -1178,8 +2643,25 @@
           "avg_discharge": { "type": "number", "example": 0.31 },
           "q95": { "type": "number", "example": 0.14 },
           "q710": { "type": "number", "example": 0.09 },
-          "intersecting_basins": { "type": "array", "items": { "type": "object" } }
-        }
+          "intersecting_basins": { "type": "array", "items": { "type": "object" } },
+          "ottobacia": {
+            "$ref": "#/components/schemas/GeoJSONBasinFeature"
+          }
+        },
+        "required": [
+          "source",
+          "area_km2",
+          "avg_discharge",
+          "q95",
+          "q710",
+          "ottobacia",
+          "rau",
+          "rxyz",
+          "isolines",
+          "ottotrecho",
+          "intersecting_basins",
+          "calculation_memorial"
+        ]
       },
       "RegularizationCatalogResponse": {
         "type": "object",
@@ -1275,8 +2757,101 @@
             }
           }
         }
+      },
+      "GeoJSONPosition": {
+        "type": "array",
+        "minItems": 2,
+        "maxItems": 3,
+        "items": {
+          "type": "number"
+        }
+      },
+      "GeoJSONLinearRing": {
+        "type": "array",
+        "minItems": 4,
+        "items": {
+          "$ref": "#/components/schemas/GeoJSONPosition"
+        },
+        "description": "Anel fechado com posições WGS84 [longitude, latitude, altitude opcional]. Fechamento e limites geográficos são validados pelo servidor."
+      },
+      "GeoJSONPolygonCoordinates": {
+        "type": "array",
+        "minItems": 1,
+        "items": {
+          "$ref": "#/components/schemas/GeoJSONLinearRing"
+        }
+      },
+      "GeoJSONPolygonGeometry": {
+        "type": "object",
+        "required": [
+          "type",
+          "coordinates"
+        ],
+        "properties": {
+          "type": {
+            "type": "string",
+            "enum": [
+              "Polygon"
+            ]
+          },
+          "coordinates": {
+            "$ref": "#/components/schemas/GeoJSONPolygonCoordinates"
+          }
+        }
+      },
+      "GeoJSONMultiPolygonGeometry": {
+        "type": "object",
+        "required": [
+          "type",
+          "coordinates"
+        ],
+        "properties": {
+          "type": {
+            "type": "string",
+            "enum": [
+              "MultiPolygon"
+            ]
+          },
+          "coordinates": {
+            "type": "array",
+            "minItems": 1,
+            "items": {
+              "$ref": "#/components/schemas/GeoJSONPolygonCoordinates"
+            }
+          }
+        }
+      },
+      "GeoJSONBasinFeature": {
+        "type": "object",
+        "required": [
+          "type",
+          "geometry"
+        ],
+        "properties": {
+          "type": {
+            "type": "string",
+            "enum": [
+              "Feature"
+            ]
+          },
+          "properties": {
+            "type": "object",
+            "nullable": true,
+            "additionalProperties": true,
+            "description": "Metadados não substituem os coeficientes oficiais. _regflow_geometry_token é uma prova opaca emitida pelo servidor; deve ser preservada ao reenviar o resultado sem alterar coordenadas."
+          },
+          "geometry": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/GeoJSONPolygonGeometry"
+              },
+              {
+                "$ref": "#/components/schemas/GeoJSONMultiPolygonGeometry"
+              }
+            ]
+          }
+        }
       }
     }
   }
 }
-

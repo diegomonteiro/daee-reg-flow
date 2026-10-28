@@ -10,11 +10,13 @@
     "dev": "nodemon ./bin/www",
     "test": "node --test",
     "test:coverage": "node --experimental-test-coverage --test",
-    "check": "node --check app.js && node --check bin/www && node --check routes/index.js && node --check routes/apis.js && node --check models/regflow.js && node --check test/api.test.js && node --check test/regflow.test.js && node --check services/dem-delineation.js && node --check test/dem-delineation.test.js && node --check public/javascripts/numbers.js && node --check test/numbers.test.js",
+    "check": "node scripts/check.js",
     "docker:build": "docker compose build",
     "docker:up": "docker compose up -d --build",
     "docker:down": "docker compose down",
-    "docker:logs": "docker compose logs -f"
+    "docker:logs": "docker compose logs -f",
+    "test:python": "node scripts/hydrology-suite.js",
+    "test:all": "npm run check && npm test && npm run test:python"
   },
   "dependencies": {
     "@turf/turf": "^6.5.0",
@@ -28,6 +30,8 @@
     "morgan": "^1.10.1"
   },
   "devDependencies": {
+    "ajv": "^8.20.0",
+    "ajv-formats": "^3.0.1",
     "nodemon": "^3.1.0"
   },
   "nodemonConfig": {

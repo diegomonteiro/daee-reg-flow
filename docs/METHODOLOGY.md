@@ -87,7 +87,7 @@ A vazão associada a uma permanência $P\%$ (de $5\%$ a $100\%$) é obtida multi
 
 $$Q_p = q_p \cdot \overline{Q} \quad [\text{m}^3/\text{s}]$$
 
-Para $P = 95\%$ (índice `18` do vetor `permanence_curve_regions` em `models/regflow.js`):
+Para $P = 95\%$ (índice `14` (base zero) do vetor de permanência em `models/regflow.js`):
 
 $$Q_{95\%} = q_{95\%} \cdot \overline{Q}$$
 
@@ -157,3 +157,23 @@ A opção **Exibir isoietas no mapa**, ativada por padrão, controla as faixas h
 ### Memorial da regionalização
 
 O modal **Ver memorial de cálculo** detalha a delimitação, a área final, a média de precipitação ponderada pelas interseções, a ponderação dos coeficientes RAU e XYZ, a vazão média e as vazões regionais Q95/Q7,10 com os fatores reais das tabelas DAEE. `services/calculation-memorial.js` registra esses parâmetros na API; o frontend apresenta as fórmulas e substituições com até oito casas decimais (mais casas para números pequenos). As vazões regionais usam a mesma vazão média global e o mesmo C ponderado utilizados no algoritmo da consulta. Simulações pluviométricas e de regularização continuam tendo resultados próprios e não substituem o memorial da consulta base.
+
+### Oferta natural e usos outorgados (primeira etapa do balanço)
+
+A geometria final seleciona pontos da camada oficial `sibh:outorgas`; o recorte calculado por MDE e a agregação a montante são preservados. Uma bacia desenhada seleciona espacialmente seus pontos, sem presumir conectividade hidrológica além do polígono. São incluídos nos grupos elegíveis os status **Não Vencida** (inclusive variações sem acento/caixa) e **Dispensado**, conforme regra solicitada. A data de publicação não restringe a consulta.
+
+O volume anual em `VOLUME_ANU` (m³/ano) é somado por grupo. Sua vazão equivalente anual é `ΣVOLUME_ANU / 31536000` (365 dias). `Vazão_ins` (m³/s) é somada à parte, sem preencher volumes ausentes ou inferir simultaneidade de operação. Captações superficiais, lançamentos superficiais, captações subterrâneas e demais interferências ficam separados; o comprometimento utiliza a demanda líquida instantânea superficial (captações menos lançamentos), sem incluir poços ou outros usos. Q média, Q95 e Q7,10 são apresentadas como referências da regionalização, recalculadas para a geometria no servidor. O equivalente anual dos usos não demonstra disponibilidade em estiagem nem é demanda medida. Dados ausentes ficam identificados e totais parcialmente conhecidos não são apresentados como completos.
+
+O comprometimento em cada referência é `100 × (ΣQins_captação_superficial − ΣQins_lançamento_superficial) / Qnatural`, calculado com **Vazão_ins** e não com o equivalente anual. Preservar percentuais negativos e superiores a 100%, sinalizando dados parciais e impedindo divisão por vazão natural não positiva ou indisponível. Trata-se de cenário de soma das vazões outorgadas, sem garantia de simultaneidade, qualidade de retorno ou atendimento em estiagem.
+
+
+## Controle de integridade e pendências de homologação
+
+A precipitação e os coeficientes oficiais prevalecem sobre os metadados do polígono. Simulações rejeitam faixas de chuva sobrepostas e verificam cobertura pela união das áreas recortadas. O volume máximo da Equação (14), inclusive na função/rota legada, não contém multiplicador adicional pela duração. Resultados não finitos são recusados explicitamente.
+
+A revisão identificou divergências ainda dependentes de fonte/valores homologados: XT da região P para T=50/100 anos; permanências 80/85% da região A; QP95 entre RAU e tabela de cálculo nas regiões I e U. Os valores dessas tabelas permanecem inalterados enquanto a fonte é fornecida. A duplicação da tabela XT foi removida: médias por região delegam à mesma consulta individual. Os testes de software não equivalem à homologação desses parâmetros.
+
+
+Na consulta de microbacias pelo painel, a máscara de subdivisão agora é o polígono final usado na regionalização (recorte local e ottobacias contribuintes selecionadas). Os polígonos adjacentes são dissolvidos antes de formar o grafo de receptores D8: limites internos de ottobacias não interrompem artificialmente a drenagem. O algoritmo e os parâmetros hidrológicos permanecem iguais. O GET por código continua a representar apenas a ottobacia oficial inteira.
+
+A coleta progressiva de outorgas usa uma grade espacial aproximada de 1 km² apenas para repartir consultas WFS. Não altera a delimitação, rede hidrológica, área ou as equações do balanço. A seleção final continua pelo mesmo Polygon/MultiPolygon; FIDs presentes em setores adjacentes são contados uma vez. Totais só são calculados após conferir todas as etapas assinadas.

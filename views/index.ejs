@@ -10,7 +10,7 @@
   <link rel="preconnect" href="https://tile.openstreetmap.org">
   <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin="anonymous">
   <link rel="stylesheet" href="https://unpkg.com/@geoman-io/leaflet-geoman-free@2.20.0/dist/leaflet-geoman.css">
-  <link rel="stylesheet" href="<%= basePath %>/stylesheets/style.css?v=20261027contourlabels1">
+  <link rel="stylesheet" href="<%= basePath %>/stylesheets/style.css?v=20261028commitment1">
 </head>
 <body>
   <header class="app-header">
@@ -117,10 +117,21 @@
           <article class="metric emphasis"><div class="metric-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M3 10c2 0 2-2 4-2s2 2 4 2 2-2 4-2 2 2 4 2"/><path d="m7 16 3 3 7-7"/></svg></div><div><span>Vazão Q95%</span><strong id="result-q95">—</strong></div></article>
           <article class="metric emphasis"><div class="metric-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><rect x="4" y="5" width="16" height="15" rx="2"/><path d="M8 3v4M16 3v4M4 10h16M8 14h.01M12 14h.01M16 14h.01"/></svg></div><div><span>Vazão Q<sub>7,10</sub></span><strong id="result-q710">—</strong></div></article>
         </div>
+        <section class="water-balance-panel">
+          <h3>Oferta natural e usos outorgados</h3>
+          <p>Consulta todas as outorgas da área calculada. Captações superficiais, lançamentos e usos subterrâneos são apresentados separadamente, pelo volume anual.</p>
+          <button class="button button-secondary" id="query-water-balance" type="button">Consultar outorgas e balanço hídrico</button>
+          <div id="water-balance-loading" class="water-balance-loading" hidden>
+            <div><label for="water-balance-progress">Carregamento das outorgas</label><strong id="water-balance-percent">0%</strong></div>
+            <progress id="water-balance-progress" max="100" value="0">0%</progress>
+            <button class="button button-secondary" id="cancel-water-balance" type="button">Pausar carregamento</button>
+          </div>
+          <p id="water-balance-status" role="status" aria-live="polite"></p>
+        </section>
         <section class="microbasins-panel" id="microbasins-panel" hidden>
-          <h3>Microbacias da ottobacia do ponto</h3>
+          <h3>Microbacias da área calculada</h3>
           <label class="field"><span>Área mínima para extrair a drenagem (km²)</span><input type="number" id="microbasin-min-area" min="0" step="any" value="0.1"></label>
-          <p>Separa contribuições por trecho nas confluências. Áreas que saem antes de alcançar a rede aparecem como residuais.</p>
+          <p>Considera o recorte da bacia e as ottobacias agregadas a montante. Separa contribuições por trecho nas confluências; saídas antes da rede aparecem como residuais.</p>
           <button class="button button-secondary" id="identify-microbasins" type="button">Identificar microbacias</button>
           <p id="microbasins-status" role="status" aria-live="polite"></p>
         </section>
@@ -370,12 +381,18 @@
     </div>
   </dialog>
 
+  <dialog class="simulation-dialog water-balance-dialog" id="water-balance-dialog" aria-labelledby="water-balance-title">
+    <div class="simulation-header"><div><p>Outorgas SP-ÁGUAS · WFS</p><h2 id="water-balance-title">Oferta natural e usos outorgados</h2></div><button class="icon-button" id="close-water-balance" type="button" aria-label="Fechar balanço hídrico">×</button></div>
+    <div class="simulation-body" id="water-balance-body"></div>
+  </dialog>
   <dialog class="simulation-dialog memorial-dialog" id="memorial-dialog" aria-labelledby="memorial-title">
     <div class="simulation-header"><div><p>Consulta atual · DAEE (1988)</p><h2 id="memorial-title">Memorial de cálculo</h2></div><button class="icon-button" id="close-memorial" type="button" aria-label="Fechar memorial">×</button></div>
     <div class="simulation-body" id="memorial-body"></div>
   </dialog>
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin="anonymous"></script>
   <script src="https://unpkg.com/@geoman-io/leaflet-geoman-free@2.20.0/dist/leaflet-geoman.min.js"></script>
+  <script src="<%= basePath %>/javascripts/request-scope.js?v=20261028a"></script>
+  <script src="<%= basePath %>/javascripts/water-balance-loader.js?v=20261028b"></script>
   <script src="<%= basePath %>/javascripts/numbers.js?v=20261027a"></script>
   <script>
   (() => {
@@ -468,7 +485,7 @@
     topographyLegend.onAdd = () => {
       const legend = L.DomUtil.create('div', 'dem-topography-legend');
       legend.id = 'dem-topography-legend'; legend.hidden = true;
-      legend.innerHTML = '<strong>Topografia considerada</strong><small>Ottobacia do ponto · cotas do MDE</small><div class="dem-topography-ramp"></div><div class="dem-topography-range"><span id="dem-topography-min"></span><span id="dem-topography-max"></span></div><small id="dem-topography-resolution"></small><small id="dem-topography-contours"></small><label>Opacidade <input id="dem-topography-opacity" type="range" min="0" max="100" value="75" aria-label="Opacidade da topografia"></label>';
+      legend.innerHTML = '<strong>Topografia considerada</strong><small id="dem-topography-scope">Área considerada · cotas do MDE</small><div class="dem-topography-ramp"></div><div class="dem-topography-range"><span id="dem-topography-min"></span><span id="dem-topography-max"></span></div><small id="dem-topography-resolution"></small><small id="dem-topography-contours"></small><label>Opacidade <input id="dem-topography-opacity" type="range" min="0" max="100" value="75" aria-label="Opacidade da topografia"></label>';
       L.DomEvent.disableClickPropagation(legend); L.DomEvent.disableScrollPropagation(legend);
       legend.querySelector('input').addEventListener('input', event => {
         demTopographyLayer.eachLayer(layer => layer.setOpacity?.(Number(event.target.value) / 100));
@@ -504,6 +521,7 @@
       contourLabelFeatures = topography.contours?.features || [];
       contourLabels.addTo(demTopographyLayer);
       text('dem-topography-contours', topography.contours_warning || 'Curvas tracejadas: 10 m · mestras: 50 m');
+      text('dem-topography-scope', topography.scope === 'calculated_basin' ? 'Área final do cálculo · cotas do MDE' : 'Ottobacia do ponto · cotas do MDE');
       text('dem-topography-min', number(topography.display_min, 1));
       text('dem-topography-max', number(topography.display_max, 1));
       text('dem-topography-resolution', `Grade de entrada: ${number(topography.source_resolution_m[0], 0)} m`);
@@ -515,11 +533,14 @@
     const basinLayer = L.geoJSON(null, { style: { color: '#087bbd', weight: 3, fillColor: '#2a9bd4', fillOpacity: .22 } }).addTo(map);
     const crossSectionLayer = L.layerGroup().addTo(map);
     const microbasinColors = ['#086fc1','#d97706','#7c3aed','#059669','#dc2626','#0f766e','#c2410c'];
+    map.createPane('microbasins');
+    map.getPane('microbasins').style.zIndex = '415';
     const microbasinLayer = L.geoJSON(null, {
-      style: feature => ({ color: feature.properties.kind === 'residual_outlet' ? '#526871' : microbasinColors[(feature.properties.unit_id-1)%microbasinColors.length],
+      pane: 'microbasins',
+      style: feature => ({ className: 'microbasin-unit', color: feature.properties.kind === 'residual_outlet' ? '#526871' : microbasinColors[(feature.properties.unit_id-1)%microbasinColors.length],
         weight: 1.5, fillOpacity: feature.properties.kind === 'residual_outlet' ? .12 : .3,
         dashArray: feature.properties.kind === 'residual_outlet' ? '3 3' : null }),
-      onEachFeature: (feature, layer) => layer.bindTooltip(`${feature.properties.kind === 'stream_reach' ? 'Microbacia' : 'Área residual'} ${feature.properties.unit_id} · ${number(feature.properties.area_km2)} km²${feature.properties.downstream_unit_id ? ` · jusante: ${feature.properties.downstream_unit_id}` : ' · saída da ottobacia'}`, { sticky: true })
+      onEachFeature: (feature, layer) => layer.bindTooltip(`${feature.properties.kind === 'stream_reach' ? 'Microbacia' : 'Área residual'} ${feature.properties.unit_id} · ${number(feature.properties.area_km2)} km²${feature.properties.downstream_unit_id ? ` · jusante: ${feature.properties.downstream_unit_id}` : ' · saída da área selecionada'}`, { sticky: true })
     }).addTo(map);
     layerControl.addOverlay(microbasinLayer, 'Microbacias D8 e áreas residuais');
     let microController = null, microGeneration = 0;
@@ -530,20 +551,21 @@
       byId('identify-microbasins').disabled = false;
     }
     byId('identify-microbasins').onclick = async () => {
-      const basinCode = lastCalculation?.upstream_basins?.find(b => b.is_clicked_basin)?.COBACIA || lastCalculation?.ottobacia?.properties?.COBACIA;
+      const geometry = lastCalculation?.ottobacia;
       const area = Number(byId('microbasin-min-area').value);
-      if (!basinCode || !Number.isFinite(area) || area <= 0) return toast('Informe uma área mínima de drenagem positiva.', 'error');
+      if (!geometry || !Number.isFinite(area) || area <= 0) return toast('Informe uma área mínima de drenagem positiva.', 'error');
       clearMicrobasins(); const generation = microGeneration;
       microController = new AbortController(); byId('identify-microbasins').disabled = true;
       text('microbasins-status', 'Identificando trechos, confluências e áreas contribuintes…');
       try {
-        const response = await fetch(`${apiBase}/api/ottobacias/${encodeURIComponent(basinCode)}/microbasins?min_drainage_area_km2=${encodeURIComponent(area)}`, { signal: microController.signal });
+        const response = await fetch(`${apiBase}/api/microbasins`, { method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ geometry, min_drainage_area_km2: area }), signal: microController.signal });
         const result = await response.json();
         if (!response.ok) throw new Error(result.error || 'Não foi possível identificar as microbacias.');
         if (generation !== microGeneration) return;
         microbasinLayer.addData(result); if (!map.hasLayer(microbasinLayer)) microbasinLayer.addTo(map);
-        map.fitBounds(microbasinLayer.getBounds(), { padding: [42,42], maxZoom: 14 });
-        text('microbasins-status', `Ottobacia ${basinCode}: ${result.metadata.microbasins_count} microbacias por trecho; ${result.metadata.residual_count} áreas residuais em cinza. Limiar da rede: ${number(area)} km². As áreas podem ser menores que esse limiar. Contribuições locais, sem sobreposição. Faixas de borda não classificadas: ${number(result.metadata.unclassified_boundary_area_km2)} km².`);
+        map.fitBounds(microbasinLayer.getBounds(), { padding: [42,42], maxZoom: 14, animate: false });
+        text('microbasins-status', `Área calculada: ${result.metadata.microbasins_count} microbacias por trecho; ${result.metadata.residual_count} áreas residuais em cinza. Limiar da rede: ${number(area)} km². As áreas podem ser menores que esse limiar. Contribuições locais, sem sobreposição. Faixas de borda não classificadas: ${number(result.metadata.unclassified_boundary_area_km2)} km².`);
       } catch(error) {
         if (generation === microGeneration && error.name !== 'AbortError') text('microbasins-status',error.message);
       } finally {
@@ -565,6 +587,15 @@
     const streamLayer = L.geoJSON(null, { pane: 'streams', style: { color: '#0759c7', weight: 5, opacity: .9 }, onEachFeature: (feature, layer) => { const p = feature?.properties || {}; layer.bindTooltip(`${p.NOCOMPLETO || 'Ottotrecho'}${p.COBACIA ? ` · Ottobacia ${p.COBACIA}` : ''}`, { sticky: true }); } }).addTo(map);
     const streamEndpointLayer = L.layerGroup().addTo(map);
     let marker = null, controller = null, isDrawing = false, lastCalculation = null, isIsohyetEditing = false, drawingAdjustmentRegion = false;
+    const isohyetRequests = RegflowRequests.createScope(), regularizationRequests = RegflowRequests.createScope();
+    function cancelRegularization() {
+      regularizationRequests.cancel(); runRegSimulationButton.disabled = false;
+      runRegSimulationButton.classList.remove('loading'); regSimulationStatus.textContent = '';
+    }
+    function cancelSimulations() {
+      isohyetRequests.cancel(); cancelRegularization();
+      runSimulationButton.disabled = false; runSimulationButton.classList.remove('loading'); simulationStatus.textContent = '';
+    }
     let catalogIsohyets = [], uploadedIsohyets = [], simulationMapLayers = [];
     let editingIsohyetGroup = null, selectedIsohyetLayer = null, editingIsohyetSource = null;
     const scenarioColors = ['#086fc1', '#d97706', '#7c3aed', '#059669', '#dc2626', '#526871'];
@@ -654,6 +685,194 @@
         copy.append(title, detail); item.append(swatch, copy); list.appendChild(item);
       });
     }
+    let balanceController = null, balanceGeneration = 0;
+    const balanceDialog = byId('water-balance-dialog');
+    const balanceKinds = {
+      surface_withdrawal: { label: 'Captação superficial', plural: 'Captações superficiais', color: '#086fc1' },
+      surface_discharge: { label: 'Lançamento superficial', plural: 'Lançamentos superficiais', color: '#059669' },
+      groundwater_withdrawal: { label: 'Captação subterrânea', plural: 'Captações subterrâneas', color: '#7c3aed' },
+      other: { label: 'Outros usos / interferências', plural: 'Outros usos / interferências', color: '#d97706' },
+      excluded: { label: 'Status excluído dos totais', color: '#64748b' }
+    };
+    const balanceValue = (value, digits=5) => Number.isFinite(value) ? number(value,digits) : 'Não informado';
+    function outorgaInformation(feature) {
+      const p=feature.properties, box=document.createElement('div');box.className='outorga-information';
+      const heading=document.createElement('strong');heading.textContent=balanceKinds[p.category]?.label || p.use_type;box.append(heading);
+      const tag=document.createElement('small');tag.textContent=p.eligible?'Incluído no respectivo grupo':'Excluído dos totais pelo status';box.append(tag);
+      const dl=document.createElement('dl');
+      const rows=[['Ponto',p.point_id || 'Não informado'],['Identificador WFS',p.source_id],['Solicitação',p.request_id || 'Não informada'],
+        ['Tipo de uso',p.use_type],['Status',p.status],['Volume anual',`${balanceValue(p.annual_volume_m3,2)}${Number.isFinite(p.annual_volume_m3)?' m³/ano':''}`],
+        ['Equivalente anual',`${balanceValue(p.annual_equivalent_m3s)}${Number.isFinite(p.annual_equivalent_m3s)?' m³/s':''}`],
+        ['Vazão instantânea',`${balanceValue(p.instantaneous_m3s)}${Number.isFinite(p.instantaneous_m3s)?' m³/s':''}`],
+        ['Coordenadas',`${number(feature.geometry.coordinates[1],6)}, ${number(feature.geometry.coordinates[0],6)}`]];
+      rows.forEach(([title,value])=>{const row=document.createElement('div'),dt=document.createElement('dt'),dd=document.createElement('dd');dt.textContent=title;dd.textContent=value;row.append(dt,dd);dl.append(row);});box.append(dl);return box;
+    }
+    map.createPane('outorgaPoints');map.getPane('outorgaPoints').style.zIndex='460';
+    const balanceLayer = L.geoJSON(null, {
+      pointToLayer: (feature, latlng) => L.circleMarker(latlng, {
+        pane: 'outorgaPoints', radius: 6, color: '#fff', weight: 1.5, fillOpacity: .95, bubblingMouseEvents:false,
+        fillColor: balanceKinds[feature.properties.eligible ? feature.properties.category : 'excluded'].color
+      }),
+      onEachFeature: (feature, layer) => {
+        const content=outorgaInformation(feature);
+        layer.bindTooltip(content, {className:'outorga-tooltip',direction:'top',opacity:1});
+        layer.bindPopup(content.cloneNode(true), {className:'outorga-popup',maxWidth:340});
+      }
+    }).addTo(map);
+    layerControl.addOverlay(balanceLayer, 'Outorgas na área calculada');
+    const balanceLegend=L.control({position:'bottomright'});
+    balanceLegend.onAdd=()=>{
+      const box=L.DomUtil.create('div','outorga-legend');box.id='outorga-legend';box.hidden=true;
+      L.DomEvent.disableClickPropagation(box);L.DomEvent.disableScrollPropagation(box);return box;
+    };
+    balanceLegend.addTo(map);
+    function refreshBalanceLegend() {
+      const box=balanceLegend.getContainer(),layers=balanceLayer.getLayers();box.replaceChildren();
+      box.hidden=!map.hasLayer(balanceLayer)||!layers.length;if(box.hidden)return;
+      const title=document.createElement('strong');title.textContent='Outorgas na área';box.append(title);
+      const subtitle=document.createElement('small');subtitle.textContent=`${number(layers.length,0)} pontos · cores por tipo e status`;box.append(subtitle);
+      const counts=Object.fromEntries(Object.keys(balanceKinds).map(key=>[key,0]));
+      layers.forEach(layer=>{const p=layer.feature.properties;counts[p.eligible?p.category:'excluded']++;});
+      const list=document.createElement('ul');
+      Object.entries(balanceKinds).forEach(([key,kind])=>{
+        const item=document.createElement('li'),dot=document.createElement('i'),name=document.createElement('span'),count=document.createElement('b');
+        dot.style.backgroundColor=kind.color;name.textContent=kind.label;count.textContent=number(counts[key],0);item.append(dot,name,count);list.append(item);
+      });box.append(list);
+    }
+    map.on('overlayadd overlayremove',event=>{if(event.layer===balanceLayer)refreshBalanceLegend();});
+    function clearWaterBalance() {
+      balanceGeneration++; balanceController?.abort(); balanceController = null; balanceLoader.reset();
+      balanceLayer.clearLayers(); refreshBalanceLegend(); if (balanceDialog.open) balanceDialog.close();
+      byId('query-water-balance').disabled = false; byId('query-water-balance').textContent = 'Consultar outorgas e balanço hídrico';
+      byId('water-balance-loading').hidden = true; text('water-balance-status', '');
+    }
+    function renderWaterBalance(data) {
+      const root = byId('water-balance-body'); root.replaceChildren();
+      const fmt = (value, digits=5) => Number.isFinite(value) ? number(value,digits) : 'Não informado';
+      function paragraph(value, className) { const p=document.createElement('p'); p.textContent=value; if(className)p.className=className; root.append(p); }
+      function table(title, headers, rows, container=root) {
+        const h=document.createElement('h3');h.textContent=title;container.append(h);
+        const wrap=document.createElement('div');wrap.className='memorial-table-wrap';const t=document.createElement('table');
+        const caption=document.createElement('caption');caption.textContent=title;t.append(caption);
+        const thead=document.createElement('thead'),tr=document.createElement('tr');
+        headers.forEach(value=>{const th=document.createElement('th');th.textContent=value;th.scope='col';tr.append(th);});thead.append(tr);t.append(thead);
+        const tbody=document.createElement('tbody');rows.forEach(values=>{const row=document.createElement('tr');values.forEach(value=>{const td=document.createElement('td');td.textContent=value;row.append(td);});tbody.append(row);});t.append(tbody);wrap.append(t);container.append(wrap);
+      }
+      paragraph(`${data.selection === 'drawn-geometry' ? 'Polígono desenhado' : 'Geometria final da consulta, incluindo o corte e as bacias agregadas'} · ${fmt(data.area_km2)} km².`);
+      paragraph(`${data.counts.in_polygon} registros na área; ${data.counts.eligible} com status Não Vencida ou Dispensado; ${data.counts.excluded_status} excluídos pelo status. Consulta WFS: ${new Date(data.source.fetched_at).toLocaleString('pt-BR')}.`);
+      paragraph(data.accounting_complete ? 'Volumes anuais superficiais completos. Confira nos indicadores as pendências de vazão instantânea.' : 'Volumes anuais superficiais incompletos: os totais conhecidos podem ser parciais. Confira as pendências de cada indicador.', data.accounting_complete ? 'balance-complete' : 'balance-incomplete');
+      const commitment=data.commitment;
+      const naturalHeading=document.createElement('h3');naturalHeading.textContent='Vazão natural e comprometimento instantâneo';root.append(naturalHeading);
+      const netBox=document.createElement('div');netBox.className='balance-commitment-summary';
+      const netLabel=document.createElement('span');netLabel.textContent='Demanda líquida instantânea superficial';
+      const netValue=document.createElement('strong');netValue.textContent=`${fmt(commitment.net_withdrawal_m3s)}${Number.isFinite(commitment.net_withdrawal_m3s)?' m³/s':''}`;
+      const equation=document.createElement('p');equation.textContent=`Captações ${fmt(commitment.withdrawals_m3s)} − lançamentos ${fmt(commitment.discharges_m3s)} (m³/s).`;
+      netBox.append(netLabel,netValue,equation);root.append(netBox);
+      if(!commitment.inputs_complete) paragraph(`Comprometimento com dados incompletos: ${commitment.missing_instantaneous_count} registro(s) superficial(is) sem vazão instantânea; ${data.counts.invalid_geometry} localização(ões) inválida(s). Percentuais parciais usam apenas as vazões conhecidas.`, 'balance-incomplete');
+      const naturalCards=document.createElement('div');naturalCards.className='balance-natural-cards';
+      [['Vazão média plurianual','avg_discharge','Referência média de longo período'],['Q95%','q95','Permanência em 95% do tempo'],['Q7,10','q710','Mínima de 7 dias · retorno de 10 anos']].forEach(([title,key,note])=>{
+        const card=document.createElement('article');card.className='balance-natural-card';card.dataset.reference=key;
+        const label=document.createElement('span');label.textContent=title;
+        const strong=document.createElement('strong');strong.textContent=fmt(data.reference[key]);const unit=document.createElement('small');unit.textContent='m³/s';
+        const detail=document.createElement('p');detail.textContent=note;card.append(label,strong,unit,detail);
+        const result=commitment.references[key],block=document.createElement('div');block.className='balance-commitment';
+        block.dataset.state=result.status==='unavailable'?'unavailable':result.status==='partial'?'partial':result.percent>100?'exceeded':result.percent<0?'negative':'calculated';
+        const caption=document.createElement('span');caption.textContent=result.status==='partial'?'Comprometimento parcial':'Comprometimento';
+        const value=document.createElement('strong');value.className='commitment-percent';value.textContent=Number.isFinite(result.percent)?`${number(result.percent,2)}%`:'Não calculável';
+        const explanation=document.createElement('small');explanation.textContent=result.status==='unavailable'
+          ? result.reason==='invalid_natural_reference'?'Vazão natural nula, negativa ou indisponível.':result.reason==='numeric_overflow'?'Resultado excede a precisão numérica.':'Sem vazões instantâneas suficientes para o cálculo.'
+          : result.status==='partial'?'Parcial: somente as vazões conhecidas.'
+          : result.percent<0?'Lançamentos superam as captações.'
+          : result.percent>100?'Demanda líquida acima desta referência.'
+          : 'Demanda líquida sobre a vazão natural.';
+        block.append(caption,value,explanation);card.append(block);naturalCards.append(card);
+      });root.append(naturalCards);
+      paragraph('Comprometimento (%) = 100 × (Σ captações superficiais − Σ lançamentos superficiais) / vazão natural. Base: Vazão_ins, em m³/s. Captações subterrâneas e outros usos ficam separados.','balance-note');
+      const useHeading=document.createElement('h3');useHeading.textContent='Usos outorgados por volume anual';root.append(useHeading);
+      const useCards=document.createElement('div');useCards.className='balance-use-cards';
+      Object.entries(data.groups).forEach(([key,g])=>{
+        const kind=balanceKinds[key],card=document.createElement('article');card.className='balance-use-card';card.style.setProperty('--use-color',kind.color);card.dataset.category=key;
+        const header=document.createElement('div');header.className='balance-card-header';
+        const title=document.createElement('h4');title.textContent=kind.plural;
+        const count=document.createElement('span');count.textContent=`${number(g.count,0)} ${g.count===1?'registro':'registros'}`;header.append(title,count);card.append(header);
+        const label=document.createElement('span');label.className='balance-card-caption';label.textContent='Volume anual conhecido';
+        const amount=document.createElement('strong');amount.className='balance-card-amount';amount.textContent=fmt(g.annual_volume_m3,2);
+        const unit=document.createElement('span');unit.className='balance-card-unit';unit.textContent='m³/ano';card.append(label,amount,unit);
+        const dl=document.createElement('dl');
+        [['Equivalente anual',`${fmt(g.annual_equivalent_m3s)} m³/s`],['Instantânea conhecida',`${fmt(g.instantaneous_m3s)} m³/s`]].forEach(([key,value])=>{
+          const row=document.createElement('div'),dt=document.createElement('dt'),dd=document.createElement('dd');dt.textContent=key;dd.textContent=value.replace('Não informado m³/s','Não informado');row.append(dt,dd);dl.append(row);
+        });card.append(dl);
+        const note=document.createElement('p');note.className=g.annual_missing_count||g.instantaneous_missing_count?'balance-card-warning':'balance-card-note';
+        note.textContent=g.annual_missing_count||g.instantaneous_missing_count
+          ? `Dados ausentes: ${g.annual_missing_count} sem volume anual; ${g.instantaneous_missing_count} sem vazão instantânea. Somas conhecidas podem ser parciais.`
+          : key==='groundwater_withdrawal'||key==='other'?'Grupo separado das captações e lançamentos superficiais.':'Valores dos registros com status Não Vencida ou Dispensado.';
+        card.append(note);useCards.append(card);
+      });root.append(useCards);
+      paragraph('Equivalente anual = volume anual / 31.536.000 segundos (365 dias). A vazão instantânea é exibida separadamente; não substitui volume anual ausente.','balance-note');
+      paragraph('O percentual representa um cenário de soma das vazões instantâneas outorgadas, sem verificar simultaneidade, sazonalidade ou qualidade dos lançamentos. Valores negativos e acima de 100% são preservados. O resultado não comprova disponibilidade em estiagem.');
+      data.warnings.forEach(value=>paragraph(value,'balance-note'));
+      const audit=document.createElement('details');audit.className='balance-audit';
+      const summary=document.createElement('summary');summary.textContent=`Ver registros e memória da consulta (${number(data.counts.in_polygon,0)} pontos)`;audit.append(summary);root.append(audit);
+      table('Detalhamento dos grupos', ['Grupo','Registros elegíveis','Volume conhecido (m³/ano)','Equivalente anual (m³/s)','Sem volume anual','Instantânea conhecida (m³/s)','Sem instantânea'],
+        Object.entries(data.groups).map(([key,g])=>[balanceKinds[key].plural,g.count,fmt(g.annual_volume_m3,2),fmt(g.annual_equivalent_m3s),g.annual_missing_count,fmt(g.instantaneous_m3s),g.instantaneous_missing_count]),audit);
+      table('Registros por status (antes da exclusão)', ['Status','Quantidade'],Object.entries(data.statuses),audit);
+      table('Memória dos registros selecionados', ['Identificador WFS / ponto','Uso','Status','Nos totais?','Volume (m³/ano)','Equivalente (m³/s)','Instantânea (m³/s)'],data.outorgas.features.map(f=>{const p=f.properties;return [p.point_id || p.source_id,p.use_type,p.status,p.eligible?'Sim, no respectivo grupo':'Não',fmt(p.annual_volume_m3,2),fmt(p.annual_equivalent_m3s),fmt(p.instantaneous_m3s)];}),audit);
+      paragraph(`Fonte: SP-ÁGUAS · ${data.source.layer}. Sem filtro de data de publicação. Consulta coletada em ${new Date(data.source.fetched_at).toLocaleString('pt-BR')}; cache de até 5 minutos.`,'balance-note');
+      balanceDialog.showModal(); root.scrollTop=0; balanceDialog.scrollTop=0;
+    }
+    const balanceLoader = RegflowWaterBalance.createLoader({
+      async request(stage, payload, signal) {
+        const controller=new AbortController(), abort=()=>controller.abort();
+        signal?.addEventListener('abort',abort,{once:true}); if(signal?.aborted)controller.abort();
+        const timeout=setTimeout(()=>controller.abort(),15000);
+        try {
+          const response=await fetch(`${apiBase}/api/water_balance/${stage}`, {method:'POST',headers:{'Content-Type':'application/json'},
+            body:JSON.stringify(payload),signal:controller.signal});
+          const data=await response.json().catch(()=>({}));
+          if(!response.ok)throw Object.assign(new Error(data.error || 'Não foi possível consultar as outorgas.'),
+            {status:response.status,retryAfter:response.headers.get('Retry-After')});
+          return data;
+        } catch(error) {
+          if(signal?.aborted)throw new DOMException('Consulta pausada.','AbortError');
+          if(error.name==='AbortError' || error instanceof TypeError)throw Object.assign(new Error('A etapa não respondeu. Tente retomar o carregamento.'),{status:502});
+          throw error;
+        } finally {clearTimeout(timeout);signal?.removeEventListener('abort',abort);}
+      },
+      onProgress(progress) {
+        byId('water-balance-progress').value=progress.percent;
+        text('water-balance-percent',`${progress.percent}%`);
+        text('water-balance-status', progress.phase==='cooldown'?`${progress.percent}% · Limite de consultas atingido. Retomada automática em ${progress.cooldownSeconds} s. ${progress.loaded} registros carregados; etapas concluídas preservadas.`
+          :progress.phase==='preparing'?'Preparando setores da área calculada…'
+          :progress.phase==='finalizing'?'99% · Conferindo etapas, removendo duplicidades e calculando o balanço…'
+          :`${progress.percent}% · ${progress.completed}/${progress.total} setores concluídos · ${progress.loaded} registros carregados.${progress.phase==='subdividing'?' Reduzindo o lote para repetir a consulta.':''} Totais disponíveis após a conferência final.`);
+      },
+      onFeatures(features) {
+        if(!lastCalculation)return;
+        balanceLayer.clearLayers().addData({type:'FeatureCollection',features});balanceLayer.addTo(map);refreshBalanceLegend();
+      }
+    });
+    byId('cancel-water-balance').addEventListener('click',()=>balanceController?.abort());
+    byId('query-water-balance').addEventListener('click', async () => {
+      if (!lastCalculation) return;
+      balanceController?.abort();const current=++balanceGeneration;balanceController=new AbortController();
+      const button=byId('query-water-balance');button.disabled=true;
+      byId('water-balance-loading').hidden=false;byId('cancel-water-balance').hidden=false;
+      try {
+        const data=await balanceLoader.run(lastCalculation.ottobacia,lastCalculation.source,balanceController.signal);
+        if(current!==balanceGeneration)return;
+        balanceLayer.clearLayers().addData(data.outorgas);balanceLayer.addTo(map);refreshBalanceLegend();
+        text('water-balance-status',`100% · ${data.counts.in_polygon} registros na área. ${data.accounting_complete ? 'Consulta completa.' : 'Há dados ausentes: totais parciais.'}`);
+        button.textContent='Consultar outorgas e balanço hídrico';renderWaterBalance(data);
+      } catch(error) {
+        if(current!==balanceGeneration)return;
+        button.textContent='Retomar carregamento das outorgas';
+        text('water-balance-status',error.name==='AbortError'?'Carregamento pausado. Retome para consultar as etapas pendentes. Pontos exibidos são parciais.'
+          :`${error.message} Retome para tentar as etapas pendentes. Nenhum balanço completo foi produzido.`);
+        if([400,409,410,413,422].includes(error.status)){balanceLoader.reset();button.textContent='Reiniciar consulta de outorgas';}
+      } finally {if(current===balanceGeneration){button.disabled=false;byId('cancel-water-balance').hidden=true;}}
+    });
+    byId('close-water-balance').addEventListener('click',()=>balanceDialog.close());
+    balanceDialog.addEventListener('click',event=>{if(event.target===balanceDialog)balanceDialog.close();});
     const memorialDialog = byId('memorial-dialog');
     function openMemorial() {
       const d = lastCalculation, m = d?.calculation_memorial;
@@ -714,8 +933,9 @@
     byId('close-memorial').addEventListener('click', () => memorialDialog.close());
     memorialDialog.addEventListener('click', event => { if (event.target === memorialDialog) memorialDialog.close(); });
     function render(data) {
-      clearMicrobasins();
+      clearMicrobasins(); clearWaterBalance();
       byId('microbasins-panel').hidden = data.source === 'drawn-geometry' || !data.ottobacia?.properties?.COBACIA;
+      cancelSimulations();
       lastCalculation = data;
       simulationButton.disabled = false;
       clearSimulationLayers();
@@ -742,7 +962,7 @@
       if (Array.isArray(data.cross_section?.stream_point)) L.circleMarker([data.cross_section.stream_point[1], data.cross_section.stream_point[0]], { radius: 5, color: '#fff', weight: 2, fillColor: '#e11d48', fillOpacity: 1 }).bindTooltip('Exutório ajustado à drenagem D8', { direction: 'top' }).addTo(crossSectionLayer);
       rainLayer.clearLayers(); (data.isolines.bands || []).forEach(b => rainLayer.addData(b)); syncIsohyetVisibility(); renderStreams(data.ottotrecho); renderBasinOverlaps(data); renderUpstreamBasins(data); streamLayer.bringToFront();
       const resultBoundsLayer = data.delineation ? basinLayer : (data.ottobacia_full ? fullBasinLayer : basinLayer);
-      map.fitBounds(resultBoundsLayer.getBounds(), { padding: [42,42], maxZoom: data.delineation ? 16 : 12 });
+      map.fitBounds(resultBoundsLayer.getBounds(), { padding: [42,42], maxZoom: data.delineation ? 16 : 12, animate: !data.topography });
       syncMapBasinOptions(data);
       const demInfo = byId('dem-delineation-info');
       if (demInfo) {
@@ -781,15 +1001,15 @@
       });
     }
     async function calculate(lat, lon) {
-      controller?.abort(); controller = new AbortController(); clearTopography(); clearMicrobasins(); setLoading(true);
+      cancelSimulations(); controller?.abort(); controller = new AbortController(); const activeController = controller; clearTopography(); clearMicrobasins(); clearWaterBalance(); setLoading(true);
       const params = new URLSearchParams();
       if (includeUpstreamInput?.checked) params.set('include_upstream', 'true');
       if (partialBasinInput && !partialBasinInput.checked) params.set('partial_basin', 'false');
       if (showTopographyInput && !showTopographyInput.checked) params.set('include_topography', 'false');
       const query = params.toString() ? `?${params.toString()}` : '';
-      try { const response = await fetch(`${apiBase}/api/coords_join/${encodeURIComponent(lat)}/${encodeURIComponent(lon)}${query}`, { signal: controller.signal }); const data = await response.json().catch(() => ({})); if (!response.ok) throw new Error(data.error === 'Point outside SP' ? 'O ponto informado está fora do Estado de São Paulo.' : data.error || 'Não foi possível calcular para este ponto.'); render(data); toast('Cálculo realizado com sucesso.'); history.replaceState(null, '', `#${map.getZoom()}/${Number(lat).toFixed(6)}/${Number(lon).toFixed(6)}`); }
-      catch (error) { if (error.name === 'AbortError') return; loading.hidden = true; empty.hidden = false; empty.querySelector('h3').textContent = 'Não foi possível calcular'; empty.querySelector('p').textContent = error.message; toast(error.message, 'error'); }
-      finally { calculateButton.disabled = false; locateButton.disabled = false; startDrawingButton.disabled = false; calculateButton.classList.remove('loading'); }
+      try { const response = await fetch(`${apiBase}/api/coords_join/${encodeURIComponent(lat)}/${encodeURIComponent(lon)}${query}`, { signal: activeController.signal }); const data = await response.json().catch(() => ({})); if (activeController !== controller) return; if (!response.ok) throw new Error(data.error === 'Point outside SP' ? 'O ponto informado está fora do Estado de São Paulo.' : data.error || 'Não foi possível calcular para este ponto.'); render(data); toast('Cálculo realizado com sucesso.'); history.replaceState(null, '', `#${map.getZoom()}/${Number(lat).toFixed(6)}/${Number(lon).toFixed(6)}`); }
+      catch (error) { if (error.name === 'AbortError' || activeController !== controller) return; loading.hidden = true; empty.hidden = false; empty.querySelector('h3').textContent = 'Não foi possível calcular'; empty.querySelector('p').textContent = error.message; toast(error.message, 'error'); }
+      finally { if (activeController !== controller) return; calculateButton.disabled = false; locateButton.disabled = false; startDrawingButton.disabled = false; calculateButton.classList.remove('loading'); }
     }
     function setDrawingMode(value) {
       isDrawing = value;
@@ -812,7 +1032,7 @@
         basinLayer.clearLayers();
         crossSectionLayer.clearLayers();
         clearTopography();
-        clearMicrobasins();
+        clearMicrobasins(); clearWaterBalance();
         basinOverlapLayer.clearLayers();
         rainLayer.clearLayers();
         streamLayer.clearLayers(); streamEndpointLayer.clearLayers();
@@ -849,10 +1069,11 @@
     }
     async function calculateDrawnGeometry(geometry, sourceLayer) {
       setDrawingMode(false);
-      controller?.abort(); controller = new AbortController(); clearTopography(); clearMicrobasins(); setLoading(true);
+      cancelSimulations(); controller?.abort(); controller = new AbortController(); const activeController = controller; clearTopography(); clearMicrobasins(); clearWaterBalance(); setLoading(true);
       try {
-        const response = await fetch(`${apiBase}/api/geometry_calculate`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ geometry }), signal: controller.signal });
+        const response = await fetch(`${apiBase}/api/geometry_calculate`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ geometry }), signal: activeController.signal });
         const data = await response.json().catch(() => ({}));
+        if (activeController !== controller) return;
         if (!response.ok) {
           const messages = { 'The geometry must be entirely within the State of São Paulo': 'A geometria deve estar inteiramente dentro do Estado de São Paulo.', 'The geometry cannot contain self-intersections': 'A geometria possui cruzamentos. Redesenhe a bacia sem cruzar as linhas.' };
           throw new Error(messages[data.error] || data.error || 'Não foi possível calcular a geometria desenhada.');
@@ -861,11 +1082,12 @@
         render(data);
         toast('Cálculo da bacia desenhada realizado com sucesso.');
       } catch (error) {
-        if (error.name === 'AbortError') return;
+        if (error.name === 'AbortError' || activeController !== controller) return;
         loading.hidden = true; empty.hidden = false;
         empty.querySelector('h3').textContent = 'Não foi possível calcular'; empty.querySelector('p').textContent = error.message;
         toast(error.message, 'error');
       } finally {
+        if (activeController !== controller) { map.removeLayer(sourceLayer); return; }
         calculateButton.disabled = false; locateButton.disabled = false; startDrawingButton.disabled = false; calculateButton.classList.remove('loading');
       }
     }
@@ -1050,6 +1272,8 @@
       byId('comparison-results').hidden = false;
     }
     async function runIsohyetSimulation() {
+      if (!lastCalculation) return;
+      const request = isohyetRequests.begin();
       const checked = [...scenarioList.querySelectorAll('input:checked')].map(input => input.dataset.scenarioId);
       if (!checked.length) return toast('Selecione ao menos uma camada de isoietas.', 'error');
       const scenarios = checked.map(id => {
@@ -1069,12 +1293,13 @@
           body = await new Response(stream).blob();
           headers['Content-Encoding'] = 'gzip';
         }
-        const response = await fetch(`${apiBase}/api/isohyet_simulation`, { method: 'POST', headers, body });
+        const response = await fetch(`${apiBase}/api/isohyet_simulation`, { method: 'POST', headers, body, signal: request.signal });
         const data = await response.json().catch(() => ({}));
         if (!response.ok) throw new Error(data.error || (response.status === 413 ? 'O servidor ou proxy recusou o tamanho da requisição.' : 'Não foi possível executar a simulação.'));
+        if (!request.isCurrent()) return;
         renderComparison(data.scenarios); simulationStatus.textContent = 'Simulação concluída.'; byId('comparison-results').scrollIntoView({ behavior: 'smooth', block: 'start' });
-      } catch (error) { simulationStatus.textContent = ''; toast(error.message, 'error'); }
-      finally { runSimulationButton.disabled = false; runSimulationButton.classList.remove('loading'); }
+      } catch (error) { if (request.isCurrent() && error.name !== 'AbortError') { simulationStatus.textContent = ''; toast(error.message, 'error'); } }
+      finally { if (request.isCurrent()) { runSimulationButton.disabled = false; runSimulationButton.classList.remove('loading'); } }
     }
     async function openSimulation() {
       if (!lastCalculation) return toast('Calcule uma bacia antes de iniciar a simulação.', 'error');
@@ -1084,6 +1309,9 @@
       }
       renderScenarioList(); simulationDialog.showModal();
     }
+    simulationDialog.addEventListener('close', () => {
+      isohyetRequests.cancel(); runSimulationButton.disabled = false; runSimulationButton.classList.remove('loading'); simulationStatus.textContent = '';
+    });
     let wasResultsOpenBeforeHide = false;
     function setSearchOpen(value) {
       searchPanel.classList.toggle('open', value);
@@ -1109,14 +1337,16 @@
       }
     }
     function startNewConsultation() {
-      controller?.abort(); controller = null;
+      cancelSimulations(); controller?.abort(); controller = null;
+      calculateButton.disabled = false; locateButton.disabled = false; startDrawingButton.disabled = false; calculateButton.classList.remove('loading');
+      if (regDialog.open) regDialog.close();
       if (memorialDialog.open) memorialDialog.close();
       if (simulationDialog.open) simulationDialog.close();
       if (isIsohyetEditing) closeIsohyetEditor(false);
       if (isDrawing) setDrawingMode(false);
       clearSimulationLayers();
       if (marker) { map.removeLayer(marker); marker = null; }
-      fullBasinLayer.clearLayers(); basinLayer.clearLayers(); crossSectionLayer.clearLayers(); clearTopography(); clearMicrobasins(); basinOverlapLayer.clearLayers(); rainLayer.clearLayers(); streamLayer.clearLayers(); streamEndpointLayer.clearLayers();
+      fullBasinLayer.clearLayers(); basinLayer.clearLayers(); crossSectionLayer.clearLayers(); clearTopography(); clearMicrobasins(); clearWaterBalance(); basinOverlapLayer.clearLayers(); rainLayer.clearLayers(); streamLayer.clearLayers(); streamEndpointLayer.clearLayers();
       const showIsohyets = showIsohyetsInput.checked;
       form.reset(); showIsohyetsInput.checked = showIsohyets; lastCalculation = null; simulationButton.disabled = true;
       loading.hidden = true; content.hidden = true; empty.hidden = false;
@@ -1268,6 +1498,7 @@
     }
 
     function updateRegBaseSummary() {
+      cancelRegularization(); regResultsSection.hidden = true;
       regRegionField.hidden = regSourceMode.value === 'map';
       const byRainfall = regQMode.value === 'rainfall';
       const byCalculated = regQMode.value === 'calculated' && lastCalculation && Number.isFinite(lastCalculation.avg_discharge);
@@ -1298,6 +1529,7 @@
     }
 
     function renderRegQueuedScenarios() {
+      cancelRegularization(); regResultsSection.hidden = true;
       regScenarioList.replaceChildren();
       if (!regQueuedScenarios.length) {
         const emptyMsg = document.createElement('p');
@@ -1586,6 +1818,7 @@
       if (!Number.isFinite(base.avg_discharge_m3s) || base.avg_discharge_m3s <= 0) {
         return toast('Informe uma vazão média plurianual Q̄ válida maior que zero.', 'error');
       }
+      const request = regularizationRequests.begin();
       runRegSimulationButton.disabled = true;
       runRegSimulationButton.classList.add('loading');
       regSimulationStatus.textContent = 'Calculando volume de regularização (Equação 14) e duração crítica (Equação 15)…';
@@ -1593,16 +1826,19 @@
         const response = await fetch(`${apiBase}/api/regularization_simulation`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ base, scenarios: regQueuedScenarios })
+          body: JSON.stringify({ base, scenarios: regQueuedScenarios }), signal: request.signal
         });
         const data = await response.json().catch(() => ({}));
         if (!response.ok) throw new Error(data.error || 'Não foi possível executar a simulação de regularização.');
+        if (!request.isCurrent()) return;
         renderRegularizationComparison(data.scenarios);
         regSimulationStatus.textContent = 'Simulação concluída com sucesso.';
       } catch (error) {
+        if (!request.isCurrent() || error.name === 'AbortError') return;
         regSimulationStatus.textContent = '';
         toast(error.message, 'error');
       } finally {
+        if (!request.isCurrent()) return;
         runRegSimulationButton.disabled = false;
         runRegSimulationButton.classList.remove('loading');
       }
@@ -1669,6 +1905,9 @@
 
     byId('open-regularization').onclick = () => openRegularization(true);
     byId('open-regularization-header').onclick = () => openRegularization(false);
+    regDialog.addEventListener('close', () => {
+      regularizationRequests.cancel(); runRegSimulationButton.disabled = false; runRegSimulationButton.classList.remove('loading'); regSimulationStatus.textContent = '';
+    });
     byId('close-regularization').onclick = () => regDialog.close();
     regDialog.addEventListener('click', event => { if (event.target === regDialog) regDialog.close(); });
     async function ensureMapCalculationIfAvailable() {

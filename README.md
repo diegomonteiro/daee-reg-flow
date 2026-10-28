@@ -115,6 +115,7 @@ Consulte a documentação completa em [`docs/API_REFERENCE.md`](docs/API_REFEREN
 
 - `GET /api-docs` e `GET /api/openapi.json`: interface Swagger UI e especificação OpenAPI 3.0.3.
 - `GET /api/coords_join/:lat/:lon`: calcula regionalização completa para a coordenada informada (aceita `?partial_basin=true|false` e `?include_upstream=true|false`).
+- `POST /api/water_balance/start`, `/api/water_balance/page` e `/api/water_balance/complete`: consulta progressiva de outorgas em setores de aproximadamente 1 km², barra de progresso, pausa/retomada e balanço conferido. Configure `GEOMETRY_SIGNING_SECRET` comum às instâncias. Ver [funcionamento e limites](docs/WATER_BALANCE.md#carregamento-progressivo-interface-padrão).
 - `POST /api/geometry_calculate`: calcula regionalização e interseções com ottobacias oficiais a partir de uma feição GeoJSON (`Polygon` ou `MultiPolygon`).
 - `GET /api/regularization_catalog` e `POST /api/regularization_simulation`: catálogo de parâmetros regionais (`A`–`U`) e simulação de 1 a 12 cenários de regularização de vazão (Equações 12 a 15).
 - `GET /api/isohyet_catalog`, `GET /api/isohyet_catalog/:id`, `POST /api/isohyet_editor_layer`, `POST /api/isohyet_adjust` e `POST /api/isohyet_simulation`: catálogo, editor cartográfico e simulação comparativa de isoietas.
@@ -122,3 +123,10 @@ Consulte a documentação completa em [`docs/API_REFERENCE.md`](docs/API_REFEREN
 - Rotas de cálculo hidrológico direto: `/api/calculate_discharge_avg/...`, `/api/calculate_q95/...`, `/api/calculate_qper/...`, `/api/calculate_q7_10/...`, `/api/calculate_q7/...`, `/api/calculate_minimal_discharge/...`, `/api/calculate_critical_duration/...`, `/api/calculate_volume_regularization/...`, `/api/calculate_max_volume_regularization/...`.
 
 Os valores são estimativas e devem ser revisados antes de uso técnico ou decisório.
+
+
+### Validação automatizada
+
+`npm run test:all` executa a checagem de sintaxe (incluindo scripts embutidos nas views), testes JavaScript/HTTP e testes Python. `npm run test:python` usa `DEM_PYTHON`, o ambiente local `.venv-hydrology` quando disponível, ou `python3`; requer as dependências de `scripts/hydrology/requirements.txt` e GDAL CLI. A CI usa Node 24, Python 3.12 e rasters sintéticos. Testes do MDE estadual são adicionais e podem ser omitidos se os rasters locais não estiverem configurados.
+
+Para múltiplas réplicas da API, configurar o mesmo `GEOMETRY_SIGNING_SECRET` forte em todas elas; ver [integridade e cache](docs/ARCHITECTURE.md). As divergências de tabelas ainda aguardando homologação estão registradas em [metodologia](docs/METHODOLOGY.md).

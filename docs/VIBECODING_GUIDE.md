@@ -55,3 +55,5 @@ Este documento foi preparado para engenheiros, desenvolvedores e agentes de Inte
 > **Prompt sugerido para IA**:
 > *"No modal `#regularization-dialog` em `views/index.ejs` e na rota `POST /api/regularization_simulation` em `routes/apis.js` (`calculateRegularizationScenario` em `models/regflow.js`), adicione suporte a `<NOVA_FUNCIONALIDADE>`, mantendo a compatibilidade com as Equações (12) a (15) do DAEE (1988) e atualizando os testes em `test/api.test.js`."*
 
+
+- **Oferta/outorgas:** `services/water-balance.js`, `POST /api/water_balance`, modal e camada de pontos em `views/index.ejs`. Preservar consulta paginada completa, recorte pelo polígono final, separação de status/usos e ausência de dados distinta de zero. Ver `docs/WATER_BALANCE.md`.

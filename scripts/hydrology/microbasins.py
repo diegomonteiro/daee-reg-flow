@@ -8,9 +8,11 @@ import rasterio
 from rasterio.features import geometry_mask, shapes
 from rasterio.windows import from_bounds, Window
 from pyproj import Transformer
+from shapely.errors import GEOSException
 from shapely.geometry import shape, mapping
 from shapely.ops import transform, unary_union
 from delineate import DIRECTIONS
+from topography import polygonal_union
 
 
 def partition(flow, valid, accumulation, min_cells, max_units=5000):
@@ -26,6 +28,17 @@ def partition(flow, valid, accumulation, min_cells, max_units=5000):
     source, target = donors[keep], rows[keep]*width + cols[keep]
     keep = valid.ravel()[target]
     receivers[source[keep]] = target[keep]
+    # Pointer doubling reaches a terminal in O(log N) vectorized steps for a
+    # functional acyclic graph. Any remaining successor belongs to/reaches a cycle,
+    # including cycles with tributaries already labelled as channel reaches.
+    pointers = receivers.copy()
+    for _ in range(int(np.ceil(np.log2(max(2, flow.size)))) + 1):
+        active = np.flatnonzero(pointers >= 0)
+        if not len(active):
+            break
+        pointers[active] = pointers[pointers[active]]
+    if np.any(pointers[donors] >= 0):
+        raise ValueError('Ciclo detectado na rede D8; revise o pré-processamento.')
     channel = valid.ravel() & (np.abs(accumulation.ravel()) >= min_cells)
     if not channel.any():
         raise ValueError('Nenhuma drenagem neste limiar de área; reduza min_drainage_area_km2.')
@@ -93,13 +106,19 @@ def delineate_microbasins(request, flow_path, accumulation_path):
         forward = Transformer.from_crs(4326, src.crs, always_xy=True).transform
         backward = Transformer.from_crs(src.crs, 4326, always_xy=True).transform
         basin = transform(forward, shape(request['basin']['geometry']))
+        scope = 'calculated_basin' if request.get('scope') == 'calculated_basin' else 'within_ottobasin'
+        if scope == 'calculated_basin':
+            # Adjacent official polygons can form an invalid MultiPolygon because
+            # they share an edge. Dissolve the final mask before partitioning D8;
+            # paths may cross ottobasin boundaries within the selected area.
+            basin = polygonal_union(basin)
         if not basin.is_valid or basin.is_empty:
-            raise ValueError('Geometria oficial inválida para subdivisão.')
+            raise ValueError('Geometria inválida para subdivisão.')
         raw = from_bounds(*basin.bounds, transform=src.transform)
         c0, r0 = int(np.floor(raw.col_off)), int(np.floor(raw.row_off))
         c1, r1 = int(np.ceil(raw.col_off+raw.width)), int(np.ceil(raw.row_off+raw.height))
         if c0 < 0 or r0 < 0 or c1 > src.width or r1 > src.height:
-            raise ValueError('MDE não cobre toda a ottobacia.')
+            raise ValueError('MDE não cobre toda a área selecionada.')
         if (r1-r0)*(c1-c0) > 4_000_000:
             raise ValueError('Janela excede 4 milhões de células; requer processamento offline.')
         window = Window(c0,r0,c1-c0,r1-r0)
@@ -109,7 +128,7 @@ def delineate_microbasins(request, flow_path, accumulation_path):
         valid = inside & ~np.ma.getmaskarray(flow) & ~np.ma.getmaskarray(accumulation)
         valid &= np.isfinite(flow.data) & np.isfinite(accumulation.data)
         if np.any(inside & ~valid):
-            raise ValueError('NoData ou valores não finitos dentro da ottobacia.')
+            raise ValueError('NoData ou valores não finitos dentro da área selecionada.')
         if np.any(valid & ~np.isin(flow.data,[0]+[d[0] for d in DIRECTIONS])):
             raise ValueError('Codificação D8 incompatível: esperado ESRI.')
         required_cells = threshold*1e6/abs(affine.a*affine.e)
@@ -123,7 +142,9 @@ def delineate_microbasins(request, flow_path, accumulation_path):
         counts = np.bincount(labels[valid],minlength=len(units)+1)
         features, area = [],0.0
         for unit, props in units.items():
-            polygon = unary_union(geometries[unit]).intersection(basin)
+            # Boundary contacts can add zero-area lines to an intersection.
+            # Keep only polygonal parts so every output remains a valid area.
+            polygon = polygonal_union(unary_union(geometries[unit]).intersection(basin))
             if polygon.is_empty or not polygon.is_valid:
                 raise ValueError('Unidade vetorizada vazia ou inválida.')
             cell = props['outlet_index']
@@ -137,11 +158,12 @@ def delineate_microbasins(request, flow_path, accumulation_path):
         stream_count = sum(p['kind']=='stream_reach' for p in units.values())
         warnings = ['Unidades incrementais locais, sem sobreposição; não são bacias acumuladas nem cadastro oficial.']
         if len(units)>stream_count:
-            warnings.append('Áreas que saem da ottobacia antes de alcançar a rede foram classificadas como residuais.')
+            warnings.append('Áreas que saem da seleção antes de alcançar a rede foram classificadas como residuais.')
         if np.any(accumulation.data[valid]<0):
             warnings.append('Há indicação de contribuição externa à cobertura do MDE.')
         return {'type':'FeatureCollection','features':features,'metadata':{
-            'basin_code':str(request['basin']['properties']['COBACIA']), 'method':'d8_reach_subcatchments',
+            'basin_code':str(request['basin']['properties']['COBACIA']) if request['basin']['properties'].get('COBACIA') is not None else None,
+            'scope':scope, 'method':'d8_reach_subcatchments',
             'min_drainage_area_km2':threshold,'microbasins_count':stream_count,'residual_count':len(units)-stream_count,
             'valid_cells':int(valid.sum()),'classified_cells':int((labels[valid]>0).sum()),
             'area_km2':area,'basin_area_km2':basin.area/1e6,
@@ -152,5 +174,5 @@ def delineate_microbasins(request, flow_path, accumulation_path):
 if __name__=='__main__':
     try:
         print(json.dumps(delineate_microbasins(json.load(sys.stdin),*sys.argv[1:3]),allow_nan=False))
-    except (ValueError,rasterio.errors.RasterioError) as error:
+    except (ValueError,GEOSException,rasterio.errors.RasterioError) as error:
         print(json.dumps({'error':str(error)}))

@@ -60,9 +60,13 @@ app.use(function(req, res, next) {
 });
 const standardJsonParser = express.json({ limit: '512kb' });
 const simulationJsonParser = express.json({ limit: '60mb' });
+const spatialJsonParser = express.json({ limit: '2mb' });
+const outorgaCompletionParser = express.json({ limit: '8mb' });
 app.use(function(req, res, next) {
   const isLargeSimulationRoute = /\/api\/(isohyet_simulation|isohyet_adjust)\/?$/.test(req.path);
-  const parser = isLargeSimulationRoute ? simulationJsonParser : standardJsonParser;
+  const parser = /\/api\/water_balance\/complete\/?$/.test(req.path) ? outorgaCompletionParser
+    : /\/api\/(water_balance(?:\/(start|page))?|microbasins)\/?$/.test(req.path) ? spatialJsonParser
+    : isLargeSimulationRoute ? simulationJsonParser : standardJsonParser;
   parser(req, res, next);
 });
 app.use(express.urlencoded({ extended: false }));
@@ -93,7 +97,7 @@ app.use(function(err, req, res, next) {
   res.status(err.status || 500);
   if (req.originalUrl.startsWith('/api/') || /\/api(\/|$|\?)/.test(req.originalUrl)) {
     if (err.type === 'entity.too.large') {
-      return res.json({ error: 'A requisição descompactada excede o limite de 60 MB da simulação.' });
+      return res.json({ error: 'A requisição excede o limite de tamanho desta operação.' });
     }
     return res.json({ error: err.status && err.status < 500 ? err.message : 'Internal server error' });
   }

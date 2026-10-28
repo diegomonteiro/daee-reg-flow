@@ -46,7 +46,7 @@ test('calculates Qmin, Q7T, critical duration and regularization volume determin
   assert.ok(Math.abs(regflow.calculateQmin('a', 0, 0.3, 0.02, 10, 2) - 2.4072) < 1e-12);
   assert.ok(Math.abs(regflow.calculateQ7T(0.75, 'a', 0, 0.3, 0.02, 10) - 1.6992) < 1e-12);
   assert.equal(regflow.calculateCriticalDuration(5, 'a', 0, 0.3, 0.02, 10), (5 - 0.708 * 0.3 * 10) / (2 * 0.708 * 0.02 * 10));
-  assert.equal(regflow.calculateVolumeRegularization(5, 'a', 0, 0.3, 0.02, 10, 2), (Math.pow(5 - 0.708 * 0.3 * 10, 2) / (4 * 0.708 * 0.02 * 10)) * (2 * 2628000));
+  assert.equal(regflow.calculateVolumeRegularization(5, 'a', 0, 0.3, 0.02, 10, 2), (Math.pow(5 - 0.708 * 0.3 * 10, 2) / (4 * 0.708 * 0.02 * 10)) * 2628000);
 });
 
 test('returns documented regional coefficients and rejects unknown regions', () => {
@@ -113,4 +113,45 @@ test('hydrological flows remain positive and scale linearly for very small basin
     assert.ok(regflow.calculateQ95('a', average) > 0);
     assert.ok(regflow.calculateQ7T(0.75, 'a', 0, 0.3, 0.02, average) > 0);
   }
+});
+
+test('basin metadata cannot replace official coefficients, rainfall, regions or intersection areas', () => {
+  const geometry = turf.bboxPolygon([-46.67, -23.60, -46.65, -23.58]);
+  const expected = regflow.getRegionsCoeficientsByGeometry(geometry);
+  const modified = structuredClone(geometry);
+  modified.properties = { avg_a: 0, avg_b: 1, coef_a: 9, coef_b: 9, coef_c: 9,
+    rain: 9999, region: 'a', partial_area: 1e9, qp95: 99, xt_10: 9 };
+  const actual = regflow.getRegionsCoeficientsByGeometry(modified);
+  for (const group of ['rau', 'rxyz']) {
+    for (const key of Object.keys(expected[group]).filter(key => key !== 'bands')) {
+      assert.deepEqual(actual[group][key], expected[group][key], `${group}.${key}`);
+    }
+    assert.deepEqual(actual[group].bands.map(b => b.properties.partial_area), expected[group].bands.map(b => b.properties.partial_area));
+  }
+  assert.equal(actual.isolines.avg_rain_areas, expected.isolines.avg_rain_areas);
+  assert.equal(regflow.getMeanRainfallByGeometry(modified).avg_areas, expected.isolines.avg_rain_areas);
+});
+
+test('official layers stay immutable during intersections and weighted averages distinguish absence from zero', () => {
+  function freeze(object) {
+    if (object && typeof object === 'object' && !Object.isFrozen(object)) {
+      Object.freeze(object); Object.values(object).forEach(freeze);
+    }
+    return object;
+  }
+  for (const layer of ['rau', 'rxyz', 'rain_isoline']) freeze(require(`../public/layers/${layer}.json`));
+  const basin = turf.bboxPolygon([-46.67, -23.60, -46.65, -23.58]);
+  const result = regflow.getRegionsCoeficientsByGeometry(basin);
+  assert.ok(Number.isFinite(result.rau.avg_a));
+  assert.equal(regflow.calculateAvgByWeight([{ value: null, weight: 100 }, { value: 10, weight: 1 }]), 10);
+  assert.equal(regflow.calculateAvgByWeight([{ value: 0, weight: 1 }, { value: 10, weight: 1 }]), 5);
+});
+
+
+test('maximum regularization volume follows Equation 14 without an extra duration multiplier', () => {
+  const value = regflow.calculateVolumeRegularization(5, 'h', 0, .4951, .0279, 9.48, 1);
+  assert.ok(Math.abs(value / 1e6 - 7.36) < .01);
+  assert.equal(regflow.calculateVolumeRegularization(5, 'h', 0, .4951, .0279, 9.48, 6), value);
+  assert.throws(() => regflow.calculateCriticalDuration(5, 'h', 0, .4951, 0, 9.48), { status: 422 });
+  assert.throws(() => regflow.calculateAvgFlowRateLongPeriod(1e308, 1e308, 1000, 1000), { status: 422 });
 });

@@ -2,6 +2,7 @@ require('dotenv').config();
 var turf    = require('@turf/turf');
 var _       = require('lodash');
 var debug   = require('debug')('daee-reg-flow:regflow');
+const { finiteResult } = require('../services/hydrology-values');
 
 var municipios_json  = require('../public/layers/municipios.json');
 var ottobacias_json  = require('../public/layers/ottobacias.json');
@@ -20,9 +21,12 @@ function boundsOverlap(a, b) {
     return a[0] <= b[2] && a[2] >= b[0] && a[1] <= b[3] && a[3] >= b[1];
 }
 
+const featureBounds = new WeakMap();
+
 function safeIntersectWithBasin(basinFeature, targetFeature, basinBounds) {
     const bBounds = basinBounds || turf.bbox(basinFeature);
-    const tBounds = targetFeature._bbox || (targetFeature._bbox = turf.bbox(targetFeature));
+    if (!featureBounds.has(targetFeature)) featureBounds.set(targetFeature, turf.bbox(targetFeature));
+    const tBounds = featureBounds.get(targetFeature);
     if (!boundsOverlap(bBounds, tBounds)) return null;
     try {
         return turf.intersect(basinFeature, targetFeature);
@@ -96,7 +100,7 @@ const regflow = {
                             coef_b: rauFeature.properties.B,
                             qp95: rauFeature.properties.QP95,
                             partial_area: partial_area};
-                        rau_band.properties = _.merge(avg_rau_obj, basinFeature.properties);
+                        rau_band.properties = { ...basinFeature.properties, ...avg_rau_obj };
                         
                         //Weight areas coefs
                         rau_avg_a_weighted_areas.push({value: avg_rau_obj.avg_a, weight: partial_area});
@@ -119,7 +123,7 @@ const regflow = {
                     if(rxyz_band){
                         var partial_area = turf.area(rxyz_band.geometry)/1000000;
                         var avg_rxyz_obj = {id: rxyzFeature.properties.ID, coef_c: rxyzFeature.properties.C, partial_area: partial_area};
-                        rxyz_band.properties = _.merge(avg_rxyz_obj, basinFeature.properties);
+                        rxyz_band.properties = { ...basinFeature.properties, ...avg_rxyz_obj };
                         
                         rxyz_avg_weighted_areas.push({value: avg_rxyz_obj.coef_c, weight: partial_area});
                         rxyz_bands.push(rxyz_band);                      
@@ -139,9 +143,9 @@ const regflow = {
                         var avg_rain_obj = {rain: rainFeature.properties.ID, partial_area: partial_area};
                         
                         //Save's calculated partial area into isoband
-                        isoband.properties = _.merge(avg_rain_obj, basinFeature.properties); 
+                        isoband.properties = { ...basinFeature.properties, ...avg_rain_obj };
                         
-                        //console.log("Isoband Properties: ", _.merge(avg_rain_obj, basinFeature.properties));
+                        //console.log("Isoband Properties: ", { ...basinFeature.properties, ...avg_rain_obj });
 
                         rain_avg_weighted_areas.push({value: avg_rain_obj.rain, weight: partial_area});
                         isobands.push(isoband);                      
@@ -189,28 +193,7 @@ const regflow = {
                 bands: isobands
             }
         };
-        if (retObj) return retObj;
-
-        return {
-            rau: {
-                bands: rau_bands,
-                avg_a:  this.calculateAvgByWeight(rau_avg_a_weighted_areas),
-                avg_b:  this.calculateAvgByWeight(rau_avg_b_weighted_areas),
-                xt_10:  this.calculateAvgByWeight(rau_avg_xt10_weigted_areas),
-                coef_a: this.calculateAvgByWeight(rau_avg_coef_a_weighted_areas),
-                coef_b: this.calculateAvgByWeight(rau_avg_coef_b_weighted_areas),
-                qp95:   this.calculateAvgByWeight(rau_avg_qp95_weighted_areas)
-            },
-            rxyz: {
-                bands: rxyz_bands,
-                coef_c: this.calculateAvgByWeight(rxyz_avg_weighted_areas)
-            },
-            isolines: {
-                avg_rain_areas: avg_rain_areas,
-                avg_rain_points: avg_rain_points,
-                bands: isobands
-            }
-        };
+        return retObj;
     },
 
     /**
@@ -239,7 +222,7 @@ const regflow = {
                 if(isoband){
                     var partial_area = turf.area(isoband.geometry)/1000000;
                     var avg_rain_obj = {rain: rainFeature.properties.ID, partial_area: partial_area};
-                    isoband.properties = _.merge(avg_rain_obj, basinFeature.properties);
+                    isoband.properties = { ...basinFeature.properties, ...avg_rain_obj };
                     rain_avg_weighted_areas.push({value: avg_rain_obj.rain, weight: partial_area});
                     isobands.push(isoband);
                 }
@@ -251,47 +234,6 @@ const regflow = {
             }
         });
         return {avg_areas: this.calculateAvgByWeight(rain_avg_weighted_areas), avg_points: this.calculateAvgByWeight(rain_avg_weighted_points), bands: isobands};
-
-        const avg_rain_areas  = this.calculateAvgByWeight(rain_avg_weighted_areas);
-        const avg_rain_points = this.calculateAvgByWeight(rain_avg_weighted_points);
-        const xt_by_period = {};
-        return_periods.forEach((period, periodIdx) => {
-            const weightedXt = rau_bands
-                .map(band => {
-                    const reg = String(band.properties && band.properties.region || '').toLowerCase();
-                    const weight = Number(band.properties && band.properties.partial_area);
-                    if (!reg || !Number.isFinite(weight) || weight <= 0) return null;
-                    try { return { value: this.getXTCoef(reg, periodIdx), weight }; } catch (_) { return null; }
-                })
-                .filter(Boolean);
-            xt_by_period[period] = this.calculateAvgByWeight(weightedXt);
-        });
-        const retObj = {
-            rau: {
-                bands: rau_bands,
-                avg_a:  this.calculateAvgByWeight(rau_avg_a_weighted_areas),
-                avg_b:  this.calculateAvgByWeight(rau_avg_b_weighted_areas),
-                xt_10:  this.calculateAvgByWeight(rau_avg_xt10_weigted_areas),
-                xt_by_period: xt_by_period,
-                coef_a: this.calculateAvgByWeight(rau_avg_coef_a_weighted_areas),
-                coef_b: this.calculateAvgByWeight(rau_avg_coef_b_weighted_areas),
-                qp95:   this.calculateAvgByWeight(rau_avg_qp95_weighted_areas)
-            },
-            rxyz: {
-                bands: rxyz_bands,
-                coef_c: this.calculateAvgByWeight(rxyz_avg_weighted_areas)
-            },
-            isolines: {
-                avg_rain_areas: avg_rain_areas,
-                avg_rain_points: avg_rain_points,
-                bands: isobands
-            }
-        };
-        if (retObj) return retObj;
-        //Return calculated Weighted By {Point,Area}
-        //return (weighted_by == 'points') ? avg_rain_points : avg_rain_areas;
-        //let rainfall_avg = (weighted_by == 'points') ? avg_rain_points : avg_rain_areas;
-        return {avg_areas: avg_rain_areas, avg_points: avg_rain_points, bands: isobands};
     },
 
     /**
@@ -299,7 +241,7 @@ const regflow = {
      */
     calculateAvgByWeight(values){
         const validValues = (Array.isArray(values) ? values : []).filter(function(item) {
-            return item && Number.isFinite(Number(item.value)) && Number(item.weight) > 0 && Number.isFinite(Number(item.weight));
+            return item && item.value !== null && item.value !== undefined && item.value !== '' && Number.isFinite(Number(item.value)) && Number(item.weight) > 0 && Number.isFinite(Number(item.weight));
         });
         var total_weight = _.sumBy(validValues, function(o){ return Number(o.weight) });
         if (!Number.isFinite(total_weight) || total_weight <= 0) return null;
@@ -443,7 +385,7 @@ const regflow = {
             });
         }
 
-        return {
+        return finiteResult({
             qf_m3s: qf,
             qf_ls: qf * 1000,
             qf_percent_of_avg: (qf / avgQ) * 100,
@@ -468,7 +410,7 @@ const regflow = {
             status,
             status_label: statusLabel,
             monthly_series: monthlySeries
-        };
+        });
     },
 
     /**
@@ -484,8 +426,9 @@ const regflow = {
      */
     calculateAvgFlowRateLongPeriod(coef_a, coef_b, avg_rainfall, area){
         var ret = ((coef_a+(coef_b*avg_rainfall))*area)/1000;
+        if (ret < 0) throw Object.assign(new RangeError('A precipitação e os parâmetros informados produzem vazão natural negativa, fora do domínio da regionalização.'), { status: 422 });
         debug('Qavg(m³/s): a=%s b=%s p=%s area=%s result=%s', coef_a, coef_b, avg_rainfall, area, ret);
-        return ret;
+        return finiteResult(ret);
     },
 
     /**
@@ -498,7 +441,7 @@ const regflow = {
         var qfs = this.getPermanenceCurvesByRegionFreqIndex(region, freqIndex);
         debug('Permanence Curve [%s][%s] => %s', region, freqIndex, qfs);
         var ret = qfs * qls_m3s;
-        return ret;
+        return finiteResult(ret);
     },
 
     /**
@@ -514,7 +457,7 @@ const regflow = {
     calculateQmin(region, time, coef_a, coef_b, qls_m3s, dmonth){
         var xt = this.getXTCoef(region, time);
         var ret = xt * (coef_a + coef_b * dmonth) * qls_m3s;
-        return ret;
+        return finiteResult(ret);
     },
 
     /**
@@ -534,7 +477,7 @@ const regflow = {
         var ret = coef_c * xt * (val_a + val_b) * qls_m3s;
 
         debug('Q7,%s => %s', return_periods[t], ret);
-        return ret;
+        return finiteResult(ret);
     },
 
     /**
@@ -545,15 +488,15 @@ const regflow = {
      * @param {*} coef_a Coef A
      * @param {*} coef_b Coef B
      * @param {*} qls_m3s Plurianual Discharge
-     * @param {*} d_months Qtd.Months to multiply seconds in month
+     * @param {*} d_months Deprecated duration argument; ignored in Equation 14
      * @returns 
      */
     calculateVolumeRegularization(qf,region,t, coef_a, coef_b, qls_m3s, d_months=1){
         var xt = this.getXTCoef(region,t);
         debug('Regularization XT: %s', xt);
-        var ret = (Math.pow((qf-(xt*coef_a*qls_m3s)), 2)/(4*xt*coef_b*qls_m3s))*(d_months * K);
+        var ret = (Math.pow((qf-(xt*coef_a*qls_m3s)), 2)/(4*xt*coef_b*qls_m3s))*K;
         debug('Max.Vol.Regularization: %s', ret);
-        return ret;
+        return finiteResult(ret);
     },
 
     /**
@@ -570,7 +513,7 @@ const regflow = {
         var xt = this.getXTCoef(region,t);
         var ret = (qf-(xt*coef_a*qls_m3s))/(2*xt*coef_b*qls_m3s);
         debug('Critical.Duration: %s', ret);
-        return ret;
+        return finiteResult(ret);
     },
 
 
@@ -623,54 +566,9 @@ const regflow = {
      * @param {*} time 
      */
     getXTCoefByRegions(regions, time){
-        const regionTable = {
-      
-            //Region R
-            a: [0.708, 0.674, 0.655, 0.641, 0.607, 0.581],
-            b: [0.708, 0.674, 0.655, 0.641, 0.607, 0.581],
-            d: [0.708, 0.674, 0.655, 0.641, 0.607, 0.581],
-            e: [0.708, 0.674, 0.655, 0.641, 0.607, 0.581],
-            f: [0.708, 0.674, 0.655, 0.641, 0.607, 0.581],
-            i: [0.708, 0.674, 0.655, 0.641, 0.607, 0.581],
-            j: [0.708, 0.674, 0.655, 0.641, 0.607, 0.581],
-        
-            //Region S
-            c: [0.748, 0.723, 0.708, 0.698, 0.673, 0.656],
-            h: [0.748, 0.723, 0.708, 0.698, 0.673, 0.656],
-        
-            //Region T
-            g: [0.632, 0.588, 0.561, 0.543, 0.496, 0.461],
-        
-            //REgion V
-            k: [0.689, 0.658, 0.639, 0.626, 0.595, 0.572],
-            n: [0.689, 0.658, 0.639, 0.626, 0.595, 0.572],
-            o: [0.689, 0.658, 0.639, 0.626, 0.595, 0.572],
-        
-            //Region U
-            l: [0.759, 0.733, 0.717, 0.706, 0.677, 0.654],
-            m: [0.759, 0.733, 0.717, 0.706, 0.677, 0.654],
-        
-            //Region W
-            p: [0.619, 0.577, 0.552, 0.535, 0.426, 0.459],
-        
-            //Region X
-            q: [0.633, 0.572, 0.533, 0.504, 0.426, 0.358],
-        
-            //Region Y
-            r: [0.661, 0.629, 0.610, 0.598, 0.568, 0.546],
-            s: [0.661, 0.629, 0.610, 0.598, 0.568, 0.546],
-            t: [0.661, 0.629, 0.610, 0.598, 0.568, 0.546],   
-            
-            //Region z  
-            u: [0.594, 0.518, 0.469, 0.433, 0.330, 0.240]
-          }
-
-        const periodIndex = Number(time);
-        const requestedRegions = (Array.isArray(regions) ? regions : [regions]).map(region => String(region || '').toLowerCase());
-        if (!Number.isInteger(periodIndex) || periodIndex < 0 || periodIndex >= return_periods.length || requestedRegions.length === 0 || requestedRegions.some(region => !regionTable[region])) {
-            throw new RangeError('Invalid region or return period index');
-        }
-        return _.mean(requestedRegions.map(region => regionTable[region][periodIndex]));
+        const requested = Array.isArray(regions) ? regions : [regions];
+        if (!requested.length) throw new RangeError('Invalid region or return period index');
+        return _.mean(requested.map(region => this.getXTCoef(region, time)));
     },
 
     /**
@@ -728,7 +626,7 @@ const regflow = {
         }
         var ret = regions[normalizedRegion][periodIndex];
         debug('Get XT Region=%s T=%s => %s', region, return_periods[time], ret);
-        return ret;
+        return finiteResult(ret);
     },
 
     /**

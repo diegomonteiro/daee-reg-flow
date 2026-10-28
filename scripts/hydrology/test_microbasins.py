@@ -31,9 +31,46 @@ class MicrobasinTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError,'Ciclo'):
             partition(np.array([[1,16],[1,0]]),np.ones((2,2),dtype=bool),np.array([[1,1],[10,20]]),2)
 
+    def test_cycles_with_tributaries_are_rejected_before_labelling(self):
+        for flow in ([[1, 1, 16]], [[1, 1, 4], [0, 64, 16]]):
+            with self.subTest(flow=flow):
+                array = np.array(flow, dtype='uint8')
+                with self.assertRaisesRegex(ValueError, 'Ciclo'):
+                    partition(array, np.ones(array.shape, dtype=bool), np.full(array.shape, 10), 2)
+
     def test_threshold_without_channels_is_rejected(self):
         with self.assertRaisesRegex(ValueError,'Nenhuma drenagem'):
             partition(np.array([[0]]),np.ones((1,1),dtype=bool),np.ones((1,1)),2)
+
+    def test_final_context_dissolves_adjacent_ottobasins_and_respects_point_cut(self):
+        with tempfile.TemporaryDirectory() as directory:
+            affine = from_origin(300000, 7400000, 30, 30)
+            paths = [Path(directory)/'flow.tif', Path(directory)/'acc.tif']
+            values = [np.full((4, 4), 4, dtype='float32'), np.tile(np.arange(1, 5, dtype='float32')[:, None], (1, 4))]
+            for path, data in zip(paths, values):
+                with rasterio.open(path, 'w', driver='GTiff', height=4, width=4, count=1, dtype='float32', crs='EPSG:31983', transform=affine, nodata=-9999) as dst:
+                    dst.write(data, 1)
+            backward = Transformer.from_crs(31983, 4326, always_xy=True).transform
+            # Adjacent upstream and downstream polygons; the lowest raster row
+            # is below the selected point and must not reappear in microbasins.
+            upstream = transform(backward, box(300000.01, 7399940, 300119.99, 7399999.99))
+            downstream = transform(backward, box(300000.01, 7399910.01, 300119.99, 7399940))
+            geometry = {'type': 'MultiPolygon', 'coordinates': [mapping(upstream)['coordinates'], mapping(downstream)['coordinates']]}
+            request = {'basin': {'properties': {'COBACIA': 'downstream'}, 'geometry': geometry},
+                       'scope': 'calculated_basin', 'min_drainage_area_km2': .0018}
+            result = delineate_microbasins(request, *paths)
+            self.assertEqual(result['metadata']['scope'], 'calculated_basin')
+            self.assertEqual(result['metadata']['valid_cells'], 12)
+            self.assertEqual(result['metadata']['classified_cells'], 12)
+            self.assertEqual(result['metadata']['microbasins_count'], 4)
+            self.assertTrue(all(f['properties']['cell_count'] == 3 for f in result['features']))
+            self.assertTrue(all(f['geometry']['type'] in ('Polygon', 'MultiPolygon') for f in result['features']))
+            polygons = [shape(f['geometry']) for f in result['features']]
+            expected = unary_union([upstream, downstream])
+            output = unary_union(polygons)
+            self.assertAlmostEqual(sum(p.area for p in polygons), output.area, places=12)
+            self.assertLess(output.difference(expected).area, 1e-12)
+            self.assertAlmostEqual(output.area, expected.area, places=12)
 
     def test_geotiff_partition_covers_cells_without_polygon_overlap(self):
         with tempfile.TemporaryDirectory() as directory:

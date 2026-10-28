@@ -2,18 +2,19 @@
 
 const { execFile } = require('node:child_process');
 const path = require('node:path');
+const { createHash } = require('node:crypto');
 const debug = require('debug')('daee-reg-flow:dem');
 
 function createDelineator({ env = process.env, execute = execFile } = {}) {
   let busy = false;
-  async function run(script, args, payload) {
+  async function run(script, args, payload, timeoutMs = 8500) {
     if (busy) throw Object.assign(new Error('Serviço MDE ocupado; tente novamente.'), { status: 503 });
     busy = true;
     try {
       return await new Promise((resolve, reject) => {
         const child = execute(env.DEM_PYTHON || 'python3', [
           path.join(__dirname, '../scripts/hydrology/', script), ...args
-        ], { timeout: 8500, maxBuffer: 16 * 1024 * 1024 }, (error, stdout, stderr) => {
+        ], { timeout: timeoutMs, maxBuffer: 16 * 1024 * 1024 }, (error, stdout, stderr) => {
           if (error) {
             debug('Worker MDE: %s; %s', error.message, String(stderr || '').slice(0, 4000));
             return reject(Object.assign(new Error('Falha no processamento MDE ou limite de 8,5 segundos excedido. Verifique dependências e rasters no servidor.'), { status: 503 }));
@@ -42,27 +43,36 @@ function createDelineator({ env = process.env, execute = execFile } = {}) {
       { basin, point, streams, inflow_basins: inflowBasins, min_drainage_area_km2: minDrainageArea,
         include_topography: options.includeTopography !== false });
   }
-  delineate.topography = async function(basin) {
+  delineate.topography = async function(basin, options = {}) {
     if (!elevationPath()) throw Object.assign(new Error('Configure DEM_ELEVATION_PATH ou DEM_D8_PATH para visualizar a topografia.'), { status: 503 });
-    return run('topography.py', [elevationPath()], { basin });
+    const timeoutMs = Math.min(8500, Math.floor(options.timeoutMs ?? 8500));
+    if (!Number.isFinite(timeoutMs) || timeoutMs < 1) throw Object.assign(new Error('Orçamento de processamento esgotado para gerar a topografia da área final.'), { status: 503 });
+    if (options.validateD8 && !env.DEM_D8_PATH) throw Object.assign(new Error('Configure DEM_D8_PATH para validar a grade de elevação.'), { status: 503 });
+    return run('topography.py', [elevationPath(), ...(options.validateD8 ? [env.DEM_D8_PATH] : [])], { basin, scope: 'calculated_basin' }, timeoutMs);
   };
   const microbasinCache = new Map();
   let cacheBytes = 0;
-  delineate.microbasins = async function(basin, minArea) {
+  delineate.microbasins = async function(basin, minArea, options = {}) {
     if (!Number.isFinite(minArea) || minArea <= 0) throw Object.assign(new Error('Área mínima de drenagem deve ser positiva.'), { status: 400 });
     if (!env.DEM_D8_PATH || !env.DEM_ACCUMULATION_PATH) throw Object.assign(new Error('Configure DEM_D8_PATH e DEM_ACCUMULATION_PATH.'), { status: 503 });
     const { stat } = require('node:fs/promises');
     let versions;
     try { versions = await Promise.all([stat(env.DEM_D8_PATH), stat(env.DEM_ACCUMULATION_PATH)]); }
     catch { throw Object.assign(new Error('Rasters D8/acumulação indisponíveis.'), { status: 503 }); }
-    const key = JSON.stringify([basin.properties.COBACIA, minArea, env.DEM_D8_PATH, env.DEM_ACCUMULATION_PATH, ...versions.map(v => [v.mtimeMs, v.size])]);
+    const scope = options.scope === 'calculated_basin' ? 'calculated_basin' : 'within_ottobasin';
+    const basinCode = basin.properties?.COBACIA ?? null;
+    // A point cut and several upstream contexts may share the same downstream code.
+    const geometryHash = createHash('sha256').update(JSON.stringify(basin.geometry)).digest('hex');
+    const key = JSON.stringify([basinCode, geometryHash, scope, minArea, env.DEM_D8_PATH, env.DEM_ACCUMULATION_PATH, ...versions.map(v => [v.mtimeMs, v.size])]);
     const cached = microbasinCache.get(key);
     if (cached && Date.now()-cached.createdAt < 15*60*1000) {
       microbasinCache.delete(key); microbasinCache.set(key,cached);
       return { value: cached.value, cache: 'HIT' };
     }
     if (cached) { microbasinCache.delete(key); cacheBytes -= cached.bytes; }
-    const value = await run('microbasins.py', [env.DEM_D8_PATH,env.DEM_ACCUMULATION_PATH], { basin, min_drainage_area_km2:minArea });
+    const selection = { type: 'Feature', geometry: basin.geometry, properties: { COBACIA: basinCode } };
+    const value = await run('microbasins.py', [env.DEM_D8_PATH,env.DEM_ACCUMULATION_PATH],
+      { basin: selection, scope, min_drainage_area_km2:minArea });
     const bytes = Buffer.byteLength(JSON.stringify(value));
     if (bytes <= 16*1024*1024) {
       while (microbasinCache.size && (microbasinCache.size>=8 || cacheBytes+bytes>16*1024*1024)) {

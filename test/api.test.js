@@ -8,6 +8,17 @@ const fs = require('node:fs');
 const app = require('../app');
 const regflow = require('../models/regflow');
 const historicalIsohyets = require('../public/layers/rain_isoline.json');
+const Ajv = require('ajv');
+const ajv = new Ajv({ strict: false, allErrors: true });
+require('ajv-formats')(ajv);
+const schemas = require('../public/openapi.json').components.schemas;
+const validators = new Map();
+function assertContract(name, payload) {
+  if (!validators.has(name)) validators.set(name, ajv.compile({ components: { schemas }, $ref: `#/components/schemas/${name}` }));
+  const validate = validators.get(name);
+  assert.ok(validate(payload), JSON.stringify(validate.errors));
+}
+
 
 let server;
 let baseUrl;
@@ -82,7 +93,7 @@ test('calculates coordinates using the nearest D8 drainage without a distance ce
   const elevationPath = process.env.DEM_ELEVATION_PATH || require('node:path').join(require('node:path').dirname(process.env.DEM_D8_PATH), 'elevation.tif');
   if (fs.existsSync(elevationPath)) {
     assert.ok(data.topography, data.topography_warning);
-    assert.equal(data.topography.scope, 'clicked_ottobasin');
+    assert.equal(data.topography.scope, 'calculated_basin');
     assert.equal(data.topography.display_crs, 'EPSG:3857');
     assert.ok(data.topography.width <= 512 && data.topography.height <= 512);
     assert.equal(Buffer.from(data.topography.image.split(',')[1], 'base64').subarray(0, 8).toString('hex'), '89504e470d0a1a0a');
@@ -125,6 +136,26 @@ test('calculates coordinates using the nearest D8 drainage without a distance ce
   }
   assert.ok(connectedData.area_km2 > localFeederData.area_km2);
   assert.ok(Number.isFinite(connectedData.avg_discharge));
+  if (fs.existsSync(elevationPath)) {
+    const bounds = require('@turf/turf').bbox(connectedData.ottobacia);
+    assert.ok(connectedData.topography, connectedData.topography_warning);
+    assert.equal(connectedData.topography.scope,'calculated_basin');
+    const image = connectedData.topography.bounds;
+    assert.ok(image[0][0] <= bounds[1]+0.00001 && image[0][1] <= bounds[0]+0.00001);
+    assert.ok(image[1][0] >= bounds[3]-0.00001 && image[1][1] >= bounds[2]-0.00001);
+  }
+  const wholeUpstreamResponse = await fetch(`${baseUrl}/api/coords_join/-23.55/-46.633309?partial_basin=false&include_upstream=true`);
+  const wholeUpstream = await wholeUpstreamResponse.json();
+  assert.equal(wholeUpstreamResponse.status,200,JSON.stringify(wholeUpstream));
+  assert.ok(wholeUpstream.upstream_basins.length > 1);
+  if (fs.existsSync(elevationPath)) {
+    const bounds = require('@turf/turf').bbox(wholeUpstream.ottobacia);
+    assert.ok(wholeUpstream.topography,wholeUpstream.topography_warning);
+    assert.equal(wholeUpstream.topography.scope,'calculated_basin');
+    assert.ok(wholeUpstream.topography.bounds[0][0] <= bounds[1]+0.00001);
+    assert.ok(wholeUpstream.topography.bounds[1][0] >= bounds[3]-0.00001);
+  }
+
 
   const taquari = await fetch(`${baseUrl}/api/coords_join/-24.037685/-48.886414`);
   const partial = await taquari.json();
@@ -542,4 +573,259 @@ test('microbasin requests retain the per-client production rate limit', async ()
   const response = await fetch(`${baseUrl}/api/ottobacias/unknown/microbasins`);
   assert.equal(response.status,429);
   assert.equal(response.headers.get('retry-after'),'60');
+});
+
+
+test('water balance rejects invalid geometry before querying WFS', async () => {
+  const response = await fetch(`${baseUrl}/api/water_balance`, {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({geometry:{type:'Point',coordinates:[-46,-23]}})});
+  assert.equal(response.status,400);
+});
+
+test('water balance recomputes natural flows for the polygon and uses annual volumes, without trusting client reference values', async () => {
+  const originalFetch=global.fetch;
+  let called=0;
+  global.fetch=async(url,options)=>{
+    if(String(url).startsWith('https://geodados.daee.sp.gov.br/geoserver/ows')) {
+      called++;
+      return new Response(JSON.stringify({type:'FeatureCollection',numberMatched:1,features:[{type:'Feature',id:'outorgas.test',geometry:{type:'Point',coordinates:[-46.64,-23.57]},properties:{tipo_uso:'Captação Superficial',STATUS_POR:'Dispensado',VOLUME_ANU:'31536000',Vazão_ins:'3'}}]}));
+    }
+    return originalFetch(url,options);
+  };
+  try {
+    const geometry={type:'Feature',properties:{},geometry:{type:'Polygon',coordinates:[[[-46.69,-23.61],[-46.59,-23.61],[-46.59,-23.53],[-46.69,-23.53],[-46.69,-23.61]]]}};
+    const response=await fetch(`${baseUrl}/api/water_balance`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({geometry,selection:'drawn-geometry',q95:999999})});
+    const data=await response.json();assert.equal(response.status,200,JSON.stringify(data));
+    assertContract('WaterBalanceResponse', data);
+    assert.equal(called,1);assert.equal(data.groups.surface_withdrawal.annual_equivalent_m3s,1);
+    assert.equal(data.groups.surface_withdrawal.instantaneous_m3s,3);
+    assert.equal(data.counts.eligible,1);assert.equal(data.selection,'drawn-geometry');
+    assert.ok(Number.isFinite(data.reference.q95) && data.reference.q95>0 && data.reference.q95!==999999);
+    assert.equal(data.accounting_complete,true);
+    assert.equal(data.commitment.basis,'instantaneous_surface_flow');
+    assert.equal(data.commitment.net_withdrawal_m3s,3);
+    assert.equal(data.commitment.complete,true);
+    assert.equal(data.commitment.references.q95.percent,3/data.reference.q95*100);
+
+  } finally {global.fetch=originalFetch;}
+});
+
+
+test('water balance returns 502 with no totals when WFS pagination cannot be verified', async()=>{
+  const originalFetch=global.fetch;
+  global.fetch=async(url,options)=>String(url).startsWith('https://geodados.daee.sp.gov.br/geoserver/ows')
+    ? new Response(JSON.stringify({type:'FeatureCollection',features:[],numberMatched:1})) : originalFetch(url,options);
+  try {
+    const geometry={type:'Feature',properties:{},geometry:{type:'Polygon',coordinates:[[[-46.68,-23.60],[-46.60,-23.60],[-46.60,-23.54],[-46.68,-23.54],[-46.68,-23.60]]]}};
+    const response=await fetch(`${baseUrl}/api/water_balance`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({geometry})});
+    const data=await response.json();assert.equal(response.status,502);assert.ok(data.error.includes('todas as outorgas'));
+    assert.equal(data.groups,undefined);assert.equal(data.reference,undefined);
+  }finally{global.fetch=originalFetch;}
+});
+
+test('accepts raw Polygon geometry and ignores client hydrological coefficients and bbox', async () => {
+  const geometry = require('@turf/turf').bboxPolygon([-46.67, -23.60, -46.65, -23.58]);
+  async function calculate(value) {
+    const response = await fetch(`${baseUrl}/api/geometry_calculate`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ geometry: value }) });
+    assert.equal(response.status, 200, await response.clone().text());
+    const data = await response.json(); assertContract('GeometryCalculateResponse', data);
+    return data;
+  }
+  const baseline = await calculate(geometry);
+  const raw = await calculate(geometry.geometry);
+  const malicious = await calculate({ ...geometry, bbox: [-180, -90, 180, 90],
+    properties: { avg_a: 0, avg_b: 1, rain: 1000, region: 'a', partial_area: 1e9, coef_c: 9 } });
+  for (const key of ['area_km2', 'avg_discharge', 'q95', 'q710']) {
+    assert.equal(raw[key], baseline[key]); assert.equal(malicious[key], baseline[key]);
+  }
+});
+
+test('upstream flags do not bypass state, self-intersection, vertex or coordinate validation', async () => {
+  const turf = require('@turf/turf');
+  const cases = [
+    [turf.bboxPolygon([-43.3, -23.1, -43.29, -23.09]), 400],
+    [turf.polygon([[[-46.70,-23.62],[-46.58,-23.52],[-46.70,-23.52],[-46.58,-23.62],[-46.64,-23.66],[-46.70,-23.62]]]), 422],
+    [turf.circle([-46.66,-23.59], .5, { steps: 5001 }), 413],
+    [{ type: 'Feature', properties: {}, geometry: { type: 'Polygon', coordinates: [[[181,0],[182,0],[182,1],[181,0]]] } }, 400],
+    [{ type: 'Feature', properties: {}, geometry: { type: 'Polygon', coordinates: [[[0,0],[1,0],[1,1],[0,1]]] } }, 400]
+  ];
+  for (const [geometry, status] of cases) {
+    geometry.properties = { COBACIA: '8669921', is_upstream_network: true, is_upstream_subbasin: true, _regflow_geometry_token: '0'.repeat(64) };
+    const response = await fetch(`${baseUrl}/api/isohyet_editor_layer`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ geometry, layerId: 'historical-1980' }) });
+    assert.equal(response.status, status, await response.text());
+  }
+});
+
+test('rejects duplicate rainfall bands instead of treating half the basin as full coverage', async () => {
+  const turf = require('@turf/turf');
+  const geometry = turf.bboxPolygon([-46.67,-23.60,-46.65,-23.58]);
+  const half = turf.bboxPolygon([-46.67,-23.60,-46.66,-23.58]); half.properties.ID = 1800;
+  const response = await fetch(`${baseUrl}/api/isohyet_simulation`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ geometry,
+    scenarios: [{ name: 'Sobreposição', layer: turf.featureCollection([half, half]) }] }) });
+  assert.equal(response.status, 422); assert.match((await response.json()).error, /sobrepostas/);
+});
+
+test('server-produced upstream geometry remains usable and its proof rejects coordinate tampering', async () => {
+  const originalElevation = regflow.getElevationByCoords;
+  regflow.getElevationByCoords = async () => null;
+  try {
+    const result = await fetch(`${baseUrl}/api/coords_join/-23.55/-46.633309?partial_basin=false&include_upstream=true&include_topography=false`);
+    const data = await result.json(); assert.equal(result.status, 200);
+    assertContract('CoordsJoinResponse', data);
+    const geometry = data.ottobacia;
+    assert.match(geometry.properties._regflow_geometry_token, /^[a-f0-9]{64}$/);
+    async function simulate(feature) {
+      return fetch(`${baseUrl}/api/isohyet_simulation`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ geometry: feature,
+        scenarios: [{ id: 'historical-1980', name: 'Histórica' }] }) });
+    }
+    const accepted = await simulate(geometry); assert.equal(accepted.status, 200, await accepted.text());
+    const forged = require('@turf/turf').bboxPolygon([-43.3,-23.1,-43.29,-23.09]); forged.properties = geometry.properties;
+    const rejected = await simulate(forged); assert.equal(rejected.status, 400);
+  } finally { regflow.getElevationByCoords = originalElevation; }
+});
+
+
+test('OpenAPI polygon schema rejects malformed positions and accepts both advertised input forms', () => {
+  const geometry = require('@turf/turf').bboxPolygon([-46.67,-23.60,-46.65,-23.58]);
+  assertContract('GeoJSONFeatureOrGeometry', geometry);
+  assertContract('GeoJSONFeatureOrGeometry', geometry.geometry);
+  const validate = validators.get('GeoJSONFeatureOrGeometry');
+  assert.equal(validate({ type: 'Feature', geometry: { type: 'Polygon', coordinates: [[[null, 0]]] } }), false);
+  assert.equal(validate({ type: 'LineString', coordinates: [[0, 0], [1, 1]] }), false);
+  assert.equal(validate({ type: 'Feature' }), false);
+  for (const name of Object.keys(schemas)) {
+    assert.doesNotThrow(() => ajv.compile({ components: { schemas }, $ref: `#/components/schemas/${name}` }), name);
+  }
+});
+
+
+test('legacy calculations reject fractional indexes, zero denominators and numeric overflow', async () => {
+  const cases = [
+    ['/calculate_critical_duration/5/.748/.4951/0/9.48', 400],
+    ['/calculate_critical_duration/h/0/5/.4951/0/9.48', 400],
+    ['/calculate_minimal_discharge/h/0.5/.4951/.0279/1/9.48', 400],
+    ['/calculate_minimal_discharge/h/0/.4951/.0279/1.5/9.48', 400],
+    ['/calculate_discharge_avg/1e308/1e308/1000/1000', 422],
+    ['/calculate_discharge_avg/-26.23/.0278/100/1000', 422],
+    ['/calculate_q95/h/-1/100', 400]
+  ];
+  for (const [route, status] of cases) {
+    const response = await fetch(baseUrl + '/api' + route);
+    assert.equal(response.status, status, await response.text());
+  }
+});
+
+test('context microbasins reject invalid geometry and thresholds before processing', async () => {
+  const geometry = require('@turf/turf').bboxPolygon([-46.67,-23.6,-46.65,-23.58]);
+  const cases = [
+    [{ geometry, min_drainage_area_km2: 0 }, 400],
+    [{ geometry, min_drainage_area_km2: -1 }, 400],
+    [{ geometry, min_drainage_area_km2: 'invalid' }, 400],
+    [{ geometry: { type: 'Point', coordinates: [-46,-23] }, min_drainage_area_km2: 1 }, 400],
+    [{ geometry: require('@turf/turf').bboxPolygon([-43.3,-23.1,-43.29,-23.09]), min_drainage_area_km2: 1 }, 400]
+  ];
+  for (const [body, status] of cases) {
+    const response = await fetch(`${baseUrl}/api/microbasins`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+    assert.equal(response.status, status, await response.text());
+  }
+});
+
+test('microbasins cover all selected upstream ottobasins and keep local point cuts distinct in cache', { skip: !hasDemData }, async () => {
+  const turf = require('@turf/turf');
+  const originalElevation = regflow.getElevationByCoords;
+  regflow.getElevationByCoords = async () => null;
+  try {
+    const selectedResponse = await fetch(`${baseUrl}/api/coords_join/-23.951116/-47.312622?include_upstream=true&include_topography=false`);
+    const selected = await selectedResponse.json(); assert.equal(selectedResponse.status, 200, JSON.stringify(selected));
+    assert.ok(selected.upstream_basins.length > 1);
+    async function micro(geometry) {
+      return fetch(`${baseUrl}/api/microbasins`, { method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ geometry, min_drainage_area_km2: 1 }) });
+    }
+    const response = await micro(selected.ottobacia), result = await response.json();
+    assert.equal(response.status, 200, JSON.stringify(result.metadata || result));
+    assertContract('MicrobasinsResponse', result);
+    assert.equal(result.metadata.scope, 'calculated_basin');
+    assert.equal(result.metadata.min_drainage_area_km2, 1);
+    assert.equal(result.metadata.classified_cells, result.metadata.valid_cells);
+    assert.ok(result.metadata.area_km2 > .98 * selected.area_km2);
+    const official = require('../public/layers/ottobacias.json');
+    // Interior witnesses avoid fragile polygon clipping at coincident raster/vector edges.
+    const units = result.features.map(feature => ({ feature, bounds: turf.bbox(feature), sample: turf.centroid(feature) }))
+      .filter(({ feature, sample }) => turf.booleanPointInPolygon(sample, feature, { ignoreBoundary: true }));
+    for (const summary of selected.upstream_basins) {
+      const basin = official.features.find(feature => feature.properties.COBACIA === summary.COBACIA);
+      assert.ok(basin, summary.COBACIA);
+      const b = turf.bbox(basin);
+      assert.ok(units.some(({ sample, bounds: a }) => {
+        if (a[0] > b[2] || a[2] < b[0] || a[1] > b[3] || a[3] < b[1]) return false;
+        return turf.booleanPointInPolygon(sample, basin, { ignoreBoundary: true });
+      }), `Sem células representadas na ottobacia ${summary.COBACIA}`);
+    }
+    const cached = await micro(selected.ottobacia); assert.equal(cached.headers.get('x-cache'), 'HIT');
+    const localResponse = await fetch(`${baseUrl}/api/coords_join/-23.951116/-47.312622?include_topography=false`);
+    const local = await localResponse.json(); assert.equal(localResponse.status, 200);
+    assert.equal(local.ottobacia.properties.COBACIA, selected.ottobacia.properties.COBACIA);
+    const localResult = await micro(local.ottobacia), data = await localResult.json();
+    assert.equal(localResult.status, 200, JSON.stringify(data)); assert.equal(localResult.headers.get('x-cache'), 'MISS');
+    assert.ok(data.metadata.basin_area_km2 < result.metadata.basin_area_km2);
+    assert.ok(Math.abs(data.metadata.basin_area_km2 / local.area_km2 - 1) < .02);
+  } finally { regflow.getElevationByCoords = originalElevation; }
+});
+
+test('progressive water balance verifies every spatial stage before returning natural references and totals', async () => {
+  const originalFetch=global.fetch, requests=[];
+  global.fetch=async(url,options)=>{
+    if(String(url).startsWith('https://geodados.daee.sp.gov.br/geoserver/ows')) {
+      requests.push(new URL(url));
+      return new Response(JSON.stringify({type:'FeatureCollection',numberMatched:1,features:[{type:'Feature',id:'progressive.test',geometry:{type:'Point',coordinates:[-46.66,-23.59]},properties:{tipo_uso:'Captação Superficial',STATUS_POR:'Dispensado',VOLUME_ANU:'31536000',Vazão_ins:'3'}}]}));
+    }
+    return originalFetch(url,options);
+  };
+  const geometry=require('@turf/turf').bboxPolygon([-46.67,-23.6,-46.652,-23.58]);
+  const post=(stage,body)=>fetch(`${baseUrl}/api/water_balance/${stage}`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
+  try {
+    let response=await post('start',{geometry,selection:'drawn-geometry',q95:999999});
+    const started=await response.json();assert.equal(response.status,200,JSON.stringify(started));
+    assertContract('WaterBalanceStartResponse',started);assert.equal(requests.length,0);
+    const plan=started.plan;assert.ok(plan.data.cells.length>1);
+    response=await post('complete',{geometry,plan,receipts:[]});assert.equal(response.status,422);
+    const receipts=[];
+    for (const cell of plan.data.cells) {
+      response=await post('page',{geometry,plan,cells:[cell]});const page=await response.json();
+      assert.equal(response.status,200,JSON.stringify(page));assertContract('WaterBalancePageResponse',page);receipts.push(page.receipt);
+    }
+    response=await post('complete',{geometry,plan,receipts,q95:999999});const result=await response.json();
+    assert.equal(response.status,200,JSON.stringify(result));assertContract('WaterBalanceResponse',result);
+    assert.equal(result.counts.in_polygon,1);assert.equal(result.commitment.net_withdrawal_m3s,3);
+    assert.ok(result.reference.q95!==999999);assert.equal(result.source.loading_method,'spatial_batches');
+    response=await post('start',{geometry});const cached=await response.json();
+    assert.equal(cached.cache,'HIT');assertContract('WaterBalanceStartResponse',cached);
+    assert.equal(cached.result.counts.in_polygon,1);
+    const changed=structuredClone(plan);changed.data.reference.q95=99999;
+    response=await post('page',{geometry,plan:changed,cells:[0]});assert.equal(response.status,400);
+  } finally {global.fetch=originalFetch;}
+});
+
+test('outorga page quotas return the remaining cooldown and reset after the current window', async () => {
+  const originalNow=Date.now;let now=originalNow();Date.now=()=>now;
+  const page=()=>fetch(`${baseUrl}/api/water_balance/page`,{method:'POST',headers:{'Content-Type':'application/json'},body:'{}'});
+  try {
+    for(let index=0;index<180;index++)assert.equal((await page()).status,400);
+    now+=20000;
+    const limited=await page();assert.equal(limited.status,429);assert.equal(limited.headers.get('retry-after'),'40');
+    now+=40000;assert.equal((await page()).status,400);
+  } finally {Date.now=originalNow;}
+});
+test('outorga pages preserve GeoServer 429 and Retry-After for the browser cooldown', async () => {
+  const originalFetch=global.fetch;
+  global.fetch=async(url,options)=>String(url).startsWith('https://geodados.daee.sp.gov.br/geoserver/ows')
+    ?new Response('<html>Rate limited</html>',{status:429,headers:{'Retry-After':'90'}}):originalFetch(url,options);
+  try {
+    const geometry=require('@turf/turf').bboxPolygon([-46.68,-23.60,-46.662,-23.58]);
+    const post=(stage,body)=>fetch(`${baseUrl}/api/water_balance/${stage}`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
+    const started=await post('start',{geometry}),{plan}=await started.json();assert.equal(started.status,200);
+    const response=await post('page',{geometry,plan,cells:plan.data.cells.slice(0,8)});
+    assert.equal(response.status,429);assert.equal(response.headers.get('retry-after'),'90');
+    assert.equal((await response.json()).groups,undefined);
+  } finally {global.fetch=originalFetch;}
 });

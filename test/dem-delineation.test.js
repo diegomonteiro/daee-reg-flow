@@ -49,7 +49,7 @@ test('topography-only rendering does not require D8, accumulation or a drainage 
     assert.match(args[0], /topography\.py$/);
     assert.deepEqual(args.slice(1), ['/data/elevation.tif']);
     return { stdin: { on() {}, end(input) {
-      assert.deepEqual(JSON.parse(input), { basin });
+      assert.deepEqual(JSON.parse(input), { basin, scope: 'calculated_basin' });
       callback(null, JSON.stringify({ topography: { image: 'png' }, topography_warning: null }));
     } } };
   };
@@ -76,4 +76,41 @@ test('microbasin cache distinguishes thresholds and invalidates when rasters cha
     assert.equal((await worker.microbasins(basin,.1)).cache,'MISS');
     assert.equal(calls,3);
   } finally {await fs.rm(directory,{recursive:true,force:true});}
+});
+
+
+test('topography uses the remaining processing budget and refuses an exhausted budget',async()=>{
+  let calls=0;
+  const render=createDelineator({env:{DEM_ELEVATION_PATH:'/data/elevation.tif',DEM_D8_PATH:'/data/d8.tif'},execute:(_python,args,options,callback)=>{
+    calls++;assert.equal(options.timeout,1200);assert.deepEqual(args.slice(1),['/data/elevation.tif','/data/d8.tif']);
+    return {stdin:{on(){},end(){callback(null,JSON.stringify({topography:{scope:'calculated_basin'}}));}}};
+  }});
+  await render.topography(basin,{timeoutMs:1200,validateD8:true});
+  await assert.rejects(render.topography(basin,{timeoutMs:0}),{status:503});assert.equal(calls,1);
+});
+
+
+test('microbasin cache and worker distinguish final geometries and scope sharing one basin code', async () => {
+  const fs = require('node:fs/promises'), os = require('node:os'), path = require('node:path');
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'regflow-micro-context-'));
+  try {
+    const flow = path.join(directory, 'flow.tif'), acc = path.join(directory, 'acc.tif');
+    await fs.writeFile(flow, 'd8'); await fs.writeFile(acc, 'acc'); const inputs = [];
+    const execute = (_python, _args, options, callback) => ({ stdin: { on() {}, end(input) {
+      assert.equal(options.timeout, 8500); const payload = JSON.parse(input); inputs.push(payload);
+      callback(null, JSON.stringify({ type: 'FeatureCollection', features: [], metadata: { scope: payload.scope } }));
+    } } });
+    const worker = createDelineator({ env: { DEM_D8_PATH: flow, DEM_ACCUMULATION_PATH: acc }, execute });
+    const local = { type: 'Feature', properties: { COBACIA: '1' }, geometry: { type: 'Polygon', coordinates: [[[0,0],[1,0],[1,1],[0,1],[0,0]]] } };
+    const upstream = structuredClone(local); upstream.geometry.coordinates[0][2][1] = 2;
+    const options = { scope: 'calculated_basin' };
+    assert.equal((await worker.microbasins(local, 1, options)).cache, 'MISS');
+    assert.equal((await worker.microbasins(upstream, 1, options)).cache, 'MISS');
+    assert.equal((await worker.microbasins(upstream, 1, options)).cache, 'HIT');
+    assert.equal((await worker.microbasins(local, 1)).cache, 'MISS');
+    assert.equal(inputs.length, 3);
+    assert.deepEqual(inputs[1].basin.geometry, upstream.geometry);
+    assert.equal(inputs[1].scope, 'calculated_basin');
+    assert.equal(inputs[2].scope, 'within_ottobasin');
+  } finally { await fs.rm(directory, { recursive: true, force: true }); }
 });

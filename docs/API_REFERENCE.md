@@ -128,3 +128,35 @@ Os campos numéricos principais de vazão, área e volume são brutos, sem arred
 ### Memorial da consulta
 
 `GET /api/coords_join/:lat/:lon` e `POST /api/geometry_calculate` incluem `calculation_memorial`: área final, interseções das isoietas, regiões RAU/XYZ, denominadores das ponderações, coeficientes utilizados e fatores f95/X10 com vazões por região, além dos resultados finais. O modal **Ver memorial de cálculo** apresenta essas etapas da consulta corrente com fórmulas e unidades. A memória usa os parâmetros da resposta; a apresentação arredonda valores, sem alterar as equações ou entradas de cálculo.
+
+### Oferta natural e usos outorgados
+
+`POST /api/water_balance` recebe `{ geometry: Feature<Polygon|MultiPolygon>, selection?: "drawn-geometry" | "calculated-geometry" }`. Usa a geometria final do cálculo, incluindo corte MDE e bacias agregadas; no desenho a seleção é espacial pelo polígono. Recalcula vazões naturais DAEE e consulta WFS 2.0.0 da SP-ÁGUAS. Devolve `reference`, `groups`, `commitment`, `counts`, `statuses`, `outorgas`, `warnings`, `complete` e `accounting_complete`. `commitment` usa exclusivamente vazões instantâneas superficiais (captações − lançamentos), com percentuais para Q média/Q95/Q7,10 sem limitar a faixa 0–100; informa status e motivos quando parcial ou não calculável. Ver [WATER_BALANCE.md](WATER_BALANCE.md) para critérios, unidades, limites e diferenças entre ausência de registros e dados ausentes. Erros: 400/413/422 de geometria, 429 de rate limit, 502 quando não é possível conferir a consulta inteira ao WFS. Header `X-Cache` corresponde apenas aos dados de outorgas.
+
+Na consulta `/api/coords_join`, `topography.scope=calculated_basin` identifica o raster e as curvas recortados à geometria final após delimitação e agregação a montante. A imagem acompanha `include_upstream` com cálculo parcial ligado ou desligado; uma falha visual gera `topography_warning` e não substitui a imagem por um recorte local. O endpoint independente `/api/dem_delineation` mantém `scope=clicked_ottobasin`.
+
+
+## Validação e compatibilidade das correções de integridade
+
+- As rotas por geometria aceitam Feature ou Geometry Polygon/MultiPolygon. O schema OpenAPI define anéis e posições; contenção em SP, fechamento e topologia também são verificados pelo servidor.
+- Para reutilizar redes a montante e recortes MDE retornados pelo servidor, manter a geometria e `_regflow_geometry_token` intactos. Marcadores booleanos e coeficientes enviados não dispensam validação nem alteram o cálculo natural.
+- Isoietas enviadas para simulação devem formar faixas sem sobreposição significativa dentro da bacia. A cobertura é calculada pela união geométrica; duplicatas ou faixas conflitantes retornam 422, mesmo quando a chuva é igual.
+- Índices de período de retorno e quantidades de meses inteiros rejeitam decimais com 400. Divisões por zero e resultados não finitos retornam 422 nas APIs de cálculo direto, em vez de valores `null` com status 200.
+- Na rota legada `calculate_max_volume_regularization`, `months` é mantido na URL e validado, mas não multiplica mais o resultado: o máximo da Equação (14) usa somente K = 2.628.000 s/mês. Para séries de déficit por duração, usar `regularization_simulation` ou a Equação (13).
+
+
+### Microbacias da área final da regionalização
+
+`POST /api/microbasins`, corpo `{ "geometry": <resultado.ottobacia>, "min_drainage_area_km2": 1 }`, retorna as microbacias de toda a área considerada: recorte pelo ponto mais os ramos a montante efetivamente selecionados. Preservar `_regflow_geometry_token`. A resposta contém `metadata.scope = "calculated_basin"`. Polígonos adjacentes são dissolvidos antes do grafo D8, permitindo conexões através de limites internos. Unidades são incrementais/disjuntas, com residuais explícitos; o limiar de 1 km² extrai a rede e não é um tamanho mínimo das unidades.
+
+O GET por código permanece restrito à ottobacia oficial inteira (`scope = "within_ottobasin"`). Os resultados dos dois escopos e de diferentes recortes não compartilham indevidamente a mesma entrada de cache. POST: até 2 MiB, validação de geometria, 30 requisições/min/IP, códigos 400/413/422/429/503. Mantidos limites de 4 milhões de células, 5.000 unidades e 8,5 segundos de execução; não há retorno truncado de apenas parte das bacias.
+
+### Outorgas por etapas
+
+- `POST /api/water_balance/start`: `{ geometry, selection }` → `{ plan, cache: "MISS" }` ou `{ result: WaterBalanceResponse, cache: "HIT" }`. Referências naturais recalculadas; plano espacial assinado por 30 minutos.
+- `POST /api/water_balance/page`: `{ geometry, plan, cells: [índices do plano, até 8], start_index: 0, previous? }` → `{ receipt, preview }`. Paginação de 500 registros com orçamento independente de 8 s; enviar o recibo anterior para continuar. O preview já contém pontos normalizados e filtrados pela geometria final. 180 chamadas/min/IP.
+- `POST /api/water_balance/complete`: `{ geometry, plan, receipts: [...] }` → `WaterBalanceResponse`. Exige cobertura completa do plano e assinaturas válidas; deduplica FIDs de borda e mantém regras do balanço. 409 para conflito na fonte; 410 para plano expirado; 422 para etapas pendentes/limites. Somente esta resposta ou um cache completo autoriza apresentar o balanço como consulta concluída.
+
+Corpos: 2 MiB em start/page, 8 MiB em complete. Não alterar o conteúdo assinado; preservar o plano e recibos integralmente. Configurar GEOMETRY_SIGNING_SECRET comum às réplicas. Progresso corresponde a setores concluídos, limitado a 99% até complete. Ver [detalhes, retomada e limites](WATER_BALANCE.md#carregamento-progressivo-interface-padrão) e os contratos OpenAPI.
+
+Nas consultas de outorgas por etapas, HTTP 429 inclui `Retry-After` (segundos ou data HTTP do WFS). O navegador compartilha o cooldown entre workers, exibe contagem regressiva e retoma automaticamente a etapa bloqueada. Páginas são espaçadas em ao menos 400 ms; 429 não provoca subdivisão de setores. O limitador local informa os segundos restantes da janela; o bloqueio remoto é repassado. Ver [cooldown](WATER_BALANCE.md#cooldown-e-respostas-429).

@@ -7,8 +7,8 @@ import numpy as np
 import rasterio
 from rasterio.io import MemoryFile
 from rasterio.transform import from_origin
-from shapely.geometry import Polygon
-from topography import render_topography, extract_contours
+from shapely.geometry import Polygon, MultiPolygon, box
+from topography import render_topography, extract_contours, polygonal_union
 
 
 class TopographyTests(unittest.TestCase):
@@ -72,6 +72,43 @@ class TopographyTests(unittest.TestCase):
             self.assertEqual(props['major'], props['elevation_m'] % 50 == 0)
             projected = shape(transform_geom('EPSG:4326', 'EPSG:31983', feature['geometry']))
             self.assertTrue(basin.buffer(.001).covers(projected))
+
+    def test_adjacent_basins_are_dissolved_without_losing_holes_or_disconnected_parts(self):
+        left = box(300000,7399740,300120,7400000)
+        right = Polygon([(300120,7399740),(300240,7399740),(300240,7400000),(300120,7400000)],
+                        holes=[[(300150,7399800),(300210,7399800),(300210,7399890),(300150,7399890)]])
+        island = box(300250,7399740,300260,7399770)
+        combined = MultiPolygon([left,right,island])
+        self.assertFalse(combined.is_valid)
+        result = polygonal_union(combined)
+        self.assertTrue(result.is_valid)
+        self.assertAlmostEqual(result.area,left.area+right.area+island.area)
+        self.assertFalse(result.covers(box(300160,7399810,300200,7399880)))
+        self.assertTrue(result.covers(island))
+        overlapping = polygonal_union(MultiPolygon([box(0,0,2,2),box(1,0,3,2)]))
+        self.assertEqual(overlapping.area,6)
+        self.assertTrue(overlapping.covers(box(1,0,2,2)))
+
+    def test_topography_and_contours_include_the_upstream_part_of_the_final_geometry(self):
+        from rasterio.warp import transform_geom
+        from shapely.geometry import shape
+        with tempfile.TemporaryDirectory() as directory:
+            source = Path(directory)/'elevation.tif'
+            self.raster(source,700+np.arange(81).reshape(9,9))
+            left = box(300001,7399731,300120,7399999)
+            upstream = box(300120,7399731,300269,7399999)
+            combined = MultiPolygon([left,upstream])
+            with rasterio.open(source) as flow:
+                local = render_topography(source,flow,left,max_size=64)
+                final = render_topography(source,flow,combined,max_size=64,scope='calculated_basin')
+            self.assertEqual(final['scope'],'calculated_basin')
+            self.assertGreater(final['bounds'][1][1],local['bounds'][1][1])
+            self.assertIsNone(final['contours_warning'])
+            lines=[shape(transform_geom('EPSG:4326','EPSG:31983',f['geometry'])) for f in final['contours']['features']]
+            self.assertTrue(any(line.intersection(upstream).length>0 for line in lines))
+            self.assertTrue(any(line.intersection(left).length>0 for line in lines))
+            expected=polygonal_union(combined).buffer(.001)
+            self.assertTrue(all(expected.covers(line) for line in lines))
 
     def test_different_elevation_grid_is_rejected(self):
         with tempfile.TemporaryDirectory() as directory:
