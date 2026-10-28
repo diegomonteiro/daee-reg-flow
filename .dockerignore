@@ -16,3 +16,8 @@ coverage
 docs
 test
 
+# Grandes dados MDE e ambientes Python são provisionados separadamente
+public/layers/mde
+data/hydrology
+.venv-hydrology
+**/__pycache__

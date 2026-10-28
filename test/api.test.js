@@ -4,14 +4,26 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const http = require('node:http');
 const zlib = require('node:zlib');
+const fs = require('node:fs');
 const app = require('../app');
 const regflow = require('../models/regflow');
 const historicalIsohyets = require('../public/layers/rain_isoline.json');
 
 let server;
 let baseUrl;
+const nativeFetch = global.fetch;
+let testClient = 0;
+let testClientIp;
+// Isolate per-client quotas between tests without disabling production rate limits.
+async function fetch(url, options = {}) {
+  const headers = new Headers(options.headers);
+  headers.set('x-forwarded-for', testClientIp);
+  return nativeFetch(url, { ...options, headers });
+}
+test.beforeEach(() => { testClientIp = `192.0.2.${++testClient}`; });
 
 test.before(async () => {
+  app.set('trust proxy', 'loopback');
   server = http.createServer(app);
   await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
   baseUrl = `http://127.0.0.1:${server.address().port}`;
@@ -29,6 +41,9 @@ test('serves the main map interface with security headers', async () => {
   assert.match(contentSecurityPolicy, /default-src 'self'/);
   assert.match(contentSecurityPolicy, /connect-src[^;]*https:\/\/unpkg\.com/);
   assert.match(html, /REG-FLOW/);
+  assert.match(contentSecurityPolicy, /img-src[^;]*https:\/\/geodados\.daee\.sp\.gov\.br/);
+  assert.match(html, /Hidrografia completa \(DAEE\)/);
+  assert.match(html, /sibh:hidrografia_completa/);
   assert.match(html, /SP-%C3%81guas-Branco\.png/);
   assert.match(html, /SP-ÁGUAS — REG-FLOW/);
   assert.match(html, /function startNewConsultation\(\)/);
@@ -55,91 +70,91 @@ test('returns a finite average-discharge calculation', async () => {
   assert.equal(data.avg, 2.5);
 });
 
-test('calculates a real São Paulo basin with finite area-weighted results and proportional upstream sub-basin', async () => {
+const hasDemData = Boolean(process.env.DEM_D8_PATH && process.env.DEM_ACCUMULATION_PATH &&
+  fs.existsSync(process.env.DEM_D8_PATH) && fs.existsSync(process.env.DEM_ACCUMULATION_PATH));
+
+test('calculates coordinates using the nearest D8 drainage without a distance ceiling', { skip: !hasDemData }, async () => {
   const response = await fetch(`${baseUrl}/api/coords_join/-23.55/-46.633309`);
   const data = await response.json();
-  assert.equal(response.status, 200);
+  assert.equal(response.status, 200, JSON.stringify(data));
   assert.equal(response.headers.get('x-cache'), 'MISS');
-  assert.ok(data.area_km2 > 0);
-  assert.ok(data.full_area_km2 > data.area_km2);
-  assert.ok(data.area_proportion > 0 && data.area_proportion < 1);
-  assert.ok(data.ottobacia_full);
-  assert.ok(data.cross_section);
-  assert.equal(data.cross_section.line.geometry.type, 'LineString');
+  assert.equal(data.delineation.method, 'dem_d8_esri');
+  const elevationPath = process.env.DEM_ELEVATION_PATH || require('node:path').join(require('node:path').dirname(process.env.DEM_D8_PATH), 'elevation.tif');
+  if (fs.existsSync(elevationPath)) {
+    assert.ok(data.topography, data.topography_warning);
+    assert.equal(data.topography.scope, 'clicked_ottobasin');
+    assert.equal(data.topography.display_crs, 'EPSG:3857');
+    assert.ok(data.topography.width <= 512 && data.topography.height <= 512);
+    assert.equal(Buffer.from(data.topography.image.split(',')[1], 'base64').subarray(0, 8).toString('hex'), '89504e470d0a1a0a');
+  }
+  assert.equal(data.delineation.snap_method, 'nearest_d8_drainage_cell');
+  assert.ok(data.delineation.snap_distance_m > 200);
+  assert.ok(data.area_km2 > 0 && data.area_km2 <= data.full_area_km2);
+  assert.ok(['LineString', 'MultiLineString'].includes(data.cross_section.line.geometry.type));
   assert.equal(data.cross_section.stream_point.length, 2);
-  assert.ok(data.rau.bands.length > 0);
-  assert.equal(data.ottotrecho[0].properties.NOCOMPLETO, 'Rio Tamanduateí');
-  assert.equal(data.ottotrecho[0].geometry.type, 'MultiLineString');
-  assert.equal(data.ottotrecho[0].properties.stream_endpoints.first.coordinates.length, 2);
-  assert.ok(data.rxyz.bands.length > 0);
+  assert.equal(data.ottobacia.properties.COBACIA, '8669921');
   assert.ok([data.isolines.avg_areas, data.avg_discharge, data.q95, data.q710].every(Number.isFinite));
   assert.equal(data.avg_discharge, regflow.calculateAvgFlowRateLongPeriod(data.rau.avg_a, data.rau.avg_b, data.isolines.avg_areas, data.area_km2));
   const rauArea = data.rau.bands.reduce((sum, band) => sum + band.properties.partial_area, 0);
   assert.ok(Math.abs(rauArea - data.area_km2) / data.area_km2 < 0.02);
 
-  const guarulhosResp = await fetch(`${baseUrl}/api/coords_join/-23.434899/-46.476631`);
-  const guarulhosData = await guarulhosResp.json();
-  assert.equal(guarulhosResp.status, 200);
-  assert.equal(guarulhosData.ottobacia.properties.COBACIA, '8669936');
-  assert.ok(guarulhosData.area_km2 > 0 && guarulhosData.area_km2 < guarulhosData.full_area_km2);
-  assert.equal(guarulhosData.cross_section.border_points.length, 2);
-  assert.ok(guarulhosData.cross_section.line.geometry.coordinates.length >= 3);
+  const direct = await fetch(`${baseUrl}/api/dem_delineation/-23.55/-46.633309?snap_distance_m=1`);
+  const directData = await direct.json();
+  assert.equal(direct.status, 200);
+  assert.deepEqual(directData.snapped_point, data.delineation.snapped_point);
+  assert.deepEqual(directData.contributing_area.geometry, data.ottobacia.geometry);
+  assert.deepEqual(directData.divide, data.cross_section.line);
 
-  const juquiaResp = await fetch(`${baseUrl}/api/coords_join/-23.951116/-47.312622`);
-  const juquiaData = await juquiaResp.json();
-  assert.equal(juquiaResp.status, 200);
-  assert.equal(juquiaData.ottobacia.properties.COBACIA, '77944933');
-  assert.equal(juquiaData.ottobacia.geometry.coordinates.length, 1);
-  assert.equal(juquiaData.area_km2, juquiaData.full_area_km2);
-  assert.equal(juquiaData.area_proportion, 1);
-  assert.equal(juquiaData.include_upstream, false);
-  assert.equal(juquiaData.available_upstream_basins_count, 12);
+  const upstream = await fetch(`${baseUrl}/api/coords_join/-23.55/-46.633309?include_upstream=true`);
+  const upstreamData = await upstream.json();
+  assert.equal(upstream.status, 200, JSON.stringify(upstreamData));
+  // This outlet has no D8-connected external feeder: do not add downstream tributaries.
+  assert.deepEqual(upstreamData.delineation.contributing_upstream_codes, []);
+  assert.equal(upstreamData.upstream_basins.length, 1);
+  assert.equal(upstreamData.area_km2, data.area_km2);
 
-  const upstreamTreeResp = await fetch(`${baseUrl}/api/coords_join/-23.55/-46.633309?include_upstream=true`);
-  const upstreamTreeData = await upstreamTreeResp.json();
-  assert.equal(upstreamTreeResp.status, 200);
-  assert.equal(upstreamTreeData.include_upstream, true);
-  assert.equal(upstreamTreeData.available_upstream_basins_count, 2);
-  assert.equal(upstreamTreeData.upstream_basins.length, 3);
-  assert.deepEqual(upstreamTreeData.upstream_basins.map(b => b.COBACIA), ['8669921', '8669922', '8669923']);
-  assert.ok(upstreamTreeData.area_km2 > data.area_km2);
-  assert.ok(upstreamTreeData.full_area_km2 > data.full_area_km2);
-  assert.ok(upstreamTreeData.avg_discharge > data.avg_discharge);
-  assert.equal(upstreamTreeData.ottobacia_full.type, 'FeatureCollection');
-  assert.equal(upstreamTreeData.ottobacia_full.features.length, 3);
+  const localFeeder = await fetch(`${baseUrl}/api/coords_join/-23.951116/-47.312622`);
+  const localFeederData = await localFeeder.json();
+  assert.equal(localFeeder.status, 200, JSON.stringify(localFeederData));
+  const connected = await fetch(`${baseUrl}/api/coords_join/-23.951116/-47.312622?include_upstream=true`);
+  const connectedData = await connected.json();
+  assert.equal(connected.status, 200, JSON.stringify(connectedData));
+  assert.ok(connectedData.delineation.contributing_upstream_codes.length > 0);
+  for (const code of connectedData.delineation.contributing_upstream_codes) {
+    assert.ok(connectedData.upstream_basins.some(basin => basin.COBACIA === code));
+  }
+  assert.ok(connectedData.area_km2 > localFeederData.area_km2);
+  assert.ok(Number.isFinite(connectedData.avg_discharge));
 
-  const jacupirangaResp = await fetch(`${baseUrl}/api/coords_join/-24.665738/-47.992401?include_upstream=true`);
-  const jacupirangaData = await jacupirangaResp.json();
-  assert.equal(jacupirangaResp.status, 200);
-  assert.equal(jacupirangaData.include_upstream, true);
-  assert.equal(jacupirangaData.available_upstream_basins_count, 10);
-  assert.equal(jacupirangaData.upstream_basins.length, 11);
-  assert.ok(jacupirangaData.area_km2 > 930);
-  assert.ok(jacupirangaData.full_area_km2 > 935);
+  const taquari = await fetch(`${baseUrl}/api/coords_join/-24.037685/-48.886414`);
+  const partial = await taquari.json();
+  assert.equal(taquari.status, 200, JSON.stringify(partial));
+  const whole = await fetch(`${baseUrl}/api/coords_join/-24.037685/-48.886414?partial_basin=false`);
+  const full = await whole.json();
+  assert.equal(whole.status, 200);
+  assert.equal(full.cross_section, null);
+  assert.equal(full.delineation, null);
+  assert.equal(full.include_topography, true);
+  if (fs.existsSync(elevationPath)) assert.ok(full.topography, full.topography_warning);
+  const withoutTopography = await fetch(`${baseUrl}/api/coords_join/-24.037685/-48.886414?partial_basin=false&include_topography=false`);
+  const withoutTopographyData = await withoutTopography.json();
+  assert.equal(withoutTopography.status, 200);
+  assert.equal(withoutTopographyData.include_topography, false);
+  assert.equal(withoutTopographyData.topography, null);
+  assert.equal(withoutTopographyData.topography_warning, null);
+  assert.deepEqual(withoutTopographyData.ottobacia, full.ottobacia);
+  assert.equal(withoutTopographyData.area_km2, full.area_km2);
+  assert.equal(withoutTopographyData.avg_discharge, full.avg_discharge);
 
-  const taquariResp = await fetch(`${baseUrl}/api/coords_join/-24.037685/-48.886414`);
-  const taquariData = await taquariResp.json();
-  assert.equal(taquariResp.status, 200);
-  assert.equal(taquariData.partial_basin, true);
-  assert.equal(taquariData.ottobacia.properties.COBACIA, '8649298');
-  assert.ok(taquariData.area_km2 > 260 && taquariData.area_km2 < taquariData.full_area_km2);
-  assert.ok(taquariData.area_proportion > 0.88 && taquariData.area_proportion < 0.96);
-
-  const taquariFullResp = await fetch(`${baseUrl}/api/coords_join/-24.037685/-48.886414?partial_basin=false`);
-  const taquariFullData = await taquariFullResp.json();
-  assert.equal(taquariFullResp.status, 200);
-  assert.equal(taquariFullData.partial_basin, false);
-  assert.equal(taquariFullData.area_proportion, 1);
-  assert.equal(taquariFullData.cross_section, null);
-  assert.ok(Math.abs(taquariFullData.area_km2 - taquariFullData.full_area_km2) < 1e-6);
-  assert.ok(taquariFullData.avg_discharge > taquariData.avg_discharge);
+  assert.equal(full.area_proportion, 1);
+  assert.ok(full.area_km2 >= partial.area_km2);
 });
 
 test('classifies the highest stream endpoint as upstream and the lowest as downstream', async () => {
   const originalElevation = regflow.getElevationByCoords;
   regflow.getElevationByCoords = async (lat, lon) => ({ min: Math.round(-lat * 100) - 10, max: Math.round(-lat * 100) });
   try {
-    const response = await fetch(`${baseUrl}/api/coords_join/-23.551/-46.632`);
+    const response = await fetch(`${baseUrl}/api/coords_join/-23.551/-46.632?partial_basin=false`);
     const data = await response.json();
     assert.equal(response.status, 200, JSON.stringify(data));
     const endpoints = data.ottotrecho[0].properties.stream_endpoints;
@@ -167,9 +182,31 @@ test('calculates regionalization from the exact user-drawn polygon', async () =>
   const data = await response.json();
   assert.equal(response.status, 200, JSON.stringify(data));
   assert.equal(data.source, 'drawn-geometry');
+  const memorial = data.calculation_memorial;
+  assert.equal(memorial.area_km2, data.area_km2);
+  assert.equal(memorial.results.avg_discharge, data.avg_discharge);
+  assert.equal(memorial.results.q95, data.q95);
+  assert.equal(memorial.results.q710, data.q710);
+  const weighted = (rows, key) => rows.reduce((sum,p)=>sum+p[key]*p.area_km2,0) / rows.reduce((sum,p)=>sum+p.area_km2,0);
+  const close = (a,b) => assert.ok(Math.abs(a-b) < 1e-10, `${a} != ${b}`);
+  close(weighted(memorial.rainfall_bands, 'rainfall_mm'), data.isolines.avg_areas);
+  close(weighted(memorial.regions, 'q95'), data.q95);
+  close(weighted(memorial.regions, 'q710'), data.q710);
+  close((memorial.coefficients.avg_a + memorial.coefficients.avg_b*memorial.rainfall_mm)*memorial.area_km2/1000, data.avg_discharge);
+
   assert.deepEqual(data.ottobacia.geometry.coordinates, geometry.geometry.coordinates);
   assert.ok(data.area_km2 > 0);
   assert.ok(data.intersecting_basins.length > 0);
+  const turf = require('@turf/turf');
+  const officialStreams = require('../public/layers/ottotrechos.json').features;
+  const originals = JSON.stringify(officialStreams);
+  const expectedStreams = officialStreams.filter(stream => turf.booleanIntersects(geometry, stream));
+  assert.ok(expectedStreams.length > 0);
+  assert.equal(data.ottotrecho.length, expectedStreams.length);
+  assert.deepEqual(data.ottotrecho.map(stream => stream.geometry), expectedStreams.map(stream => stream.geometry));
+  assert.ok(data.ottotrecho.every(stream => stream.properties.stream_endpoints?.upstream && stream.properties.stream_endpoints?.downstream));
+  assert.equal(JSON.stringify(officialStreams), originals, 'Must not mutate the official stream layer');
+
   assert.ok(data.intersecting_basins.every(feature => {
     const properties = feature.properties;
     return properties.COBACIA && properties.overlap_area_km2 > 0 && properties.drawn_area_percent > 0 && properties.drawn_area_percent <= 100 && properties.basin_area_percent > 0 && properties.basin_area_percent <= 100;
@@ -297,7 +334,7 @@ test('returns identical results when the uploaded isohyets equal the historical 
 });
 
 test('accepts an official MultiPolygon basin in an isohyet simulation', async () => {
-  const basinResponse = await fetch(`${baseUrl}/api/coords_join/-23.55/-46.633309`);
+  const basinResponse = await fetch(`${baseUrl}/api/coords_join/-23.55/-46.633309?partial_basin=false`);
   const basin = await basinResponse.json();
   assert.equal(basin.ottobacia.geometry.type, 'MultiPolygon');
   const response = await fetch(`${baseUrl}/api/isohyet_simulation`, {
@@ -447,4 +484,62 @@ test('serves application, static assets, APIs and Swagger UI under /reg-flow sub
   const spec = await specRes.json();
   assert.equal(specRes.status, 200);
   assert.equal(spec.servers[0].url, '/reg-flow');
+});
+
+test('MDE endpoint validates coordinates and basin coverage', async () => {
+  for (const suffix of ['bad/-46', '91/-46']) {
+    const response = await fetch(`${baseUrl}/api/dem_delineation/${suffix}`);
+    assert.equal(response.status, 400);
+  }
+  const outside = await fetch(`${baseUrl}/api/dem_delineation/0/0`);
+  assert.equal(outside.status, 404);
+});
+
+test('retains small discharge values and their nonzero labels in the regularization API', async () => {
+  const average = 0.00021374917284;
+  const demand = average * 0.5;
+  const response = await fetch(`${baseUrl}/api/regularization_simulation`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ base: { region: 'H', avg_discharge_m3s: average }, scenarios: [{ qf_m3s: demand, return_period_years: 10 }] })
+  });
+  const data = await response.json();
+  assert.equal(response.status, 200, JSON.stringify(data));
+  assert.equal(data.scenarios[0].qf_m3s, demand);
+  assert.equal(data.scenarios[0].avg_discharge_m3s, average);
+  assert.ok(data.scenarios[0].q1_t_m3s > 0);
+  assert.match(data.scenarios[0].name, /0,000107 m³\/s/);
+});
+
+test('microbasin endpoint rejects invalid thresholds and unknown basin codes', async () => {
+  for(const area of ['0','-1','bad','Infinity']) {
+    const response=await fetch(`${baseUrl}/api/ottobacias/8669921/microbasins?min_drainage_area_km2=${area}`);
+    assert.equal(response.status,400);
+  }
+  assert.equal((await fetch(`${baseUrl}/api/ottobacias/unknown/microbasins`)).status,404);
+});
+
+test('microbasin endpoint partitions the local raster and caches identical queries', {skip:!hasDemData}, async () => {
+  const url=`${baseUrl}/api/ottobacias/8669921/microbasins?min_drainage_area_km2=0.1`;
+  const response=await fetch(url);const data=await response.json();
+  assert.equal(response.status,200,JSON.stringify(data.metadata||data));
+  assert.equal(response.headers.get('x-cache'),'MISS');
+  assert.equal(data.type,'FeatureCollection');
+  assert.equal(data.metadata.classified_cells,data.metadata.valid_cells);
+  assert.ok(data.metadata.microbasins_count>1);
+  assert.equal(data.features.length,data.metadata.microbasins_count+data.metadata.residual_count);
+  assert.equal(data.features.reduce((sum,f)=>sum+f.properties.cell_count,0),data.metadata.valid_cells);
+  const ids=new Set(data.features.map(f=>f.properties.unit_id));
+  for(const feature of data.features) {
+    assert.ok(feature.properties.area_km2>0);
+    assert.ok(!feature.properties.downstream_unit_id||ids.has(feature.properties.downstream_unit_id));
+  }
+  const cached=await fetch(url);assert.equal(cached.status,200);assert.equal(cached.headers.get('x-cache'),'HIT');
+});
+
+
+test('microbasin requests retain the per-client production rate limit', async () => {
+  for (let i=0; i<30; i++) assert.equal((await fetch(`${baseUrl}/api/ottobacias/unknown/microbasins`)).status,404);
+  const response = await fetch(`${baseUrl}/api/ottobacias/unknown/microbasins`);
+  assert.equal(response.status,429);
+  assert.equal(response.headers.get('retry-after'),'60');
 });

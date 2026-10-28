@@ -128,3 +128,9 @@ dist
 .yarn/build-state.yml
 .yarn/install-state.gz
 .pnp.*
+
+# MDE e derivados locais (não versionar rasters de grande porte)
+public/layers/mde/
+data/hydrology/
+.venv-hydrology/
+__pycache__/

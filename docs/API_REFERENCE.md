@@ -11,10 +11,12 @@ A API do **REG-FLOW** está documentada segundo o padrão **OpenAPI 3.0.3** e po
 
 ### 1.1. Consulta Espacial e Bacias
 
+O modo parcial padrão usa MDE D8: busca a célula de drenagem mais próxima em toda a ottobacia, sem limite de distância. `include_upstream=true` inclui somente os ramos cujas entradas D8 alcançam a área local selecionada. Requer runtime e rasters MDE; não há fallback geométrico. `cross_section.line` agora é LineString/MultiLineString (ou null), e `delineation` informa ajuste, método e avisos.
+
 | Método | Rota | Descrição | Rate Limit |
 | :--- | :--- | :--- | :--- |
 | `GET` | `/api/coords_join/:lat/:lon` | Calcula a regionalização completa por coordenada geográfica. Suporta `?partial_basin=true\|false` e `?include_upstream=true\|false`. | 30 req/min |
-| `POST` | `/api/geometry_calculate` | Calcula a regionalização e interseções de ottobacias a partir de um polígono GeoJSON desenhado (`{ geometry }`). | 30 req/min |
+| `POST` | `/api/geometry_calculate` | Calcula a regionalização e interseções de ottobacias a partir de um polígono GeoJSON desenhado (`{ geometry }`), com os ottotrechos oficiais que intersectam o desenho em `ottotrecho` (geometrias integrais e extremos para conferência). | 30 req/min |
 
 #### Exemplo — Consulta com recorte parcial + bacias à montante:
 ```bash
@@ -108,3 +110,21 @@ Todas as respostas de erro em `/api/*` retornam JSON no formato `{ "error": "Men
 - `422 Unprocessable Entity`: Geometria com autointerseções ou camada de isoietas cobrindo menos de 95% da bacia.
 - `429 Too Many Requests`: Limite de 30 requisições por minuto atingido.
 
+
+## Delimitação por MDE
+
+`GET /api/dem_delineation/:lat/:lon` retorna divisor interno (`divide`), polígono local (`contributing_area`), exutório ajustado, distância efetiva e entradas a montante conectadas. Sem limite de distância; rede extraída por área contribuinte mínima `DEM_MIN_DRAINAGE_AREA_KM2=0.1`. O parâmetro antigo `snap_distance_m` na query é ignorado; na resposta continua representando a distância efetiva. O mesmo algoritmo substitui a linha reta em `/api/coords_join` com `partial_basin=true`. Uma tarefa por processo, execução Python limitada a 8,5 s; erros 422/503 são propagados. Consulte [preparação e limitações](DEM_DELINEATION.md).
+
+As respostas de `/api/coords_join` no modo parcial e `/api/dem_delineation` incluem `topography` (PNG data URI, bounds Leaflet, cotas representadas, resolução nativa e tamanho até 512 px) e `topography_warning`. A imagem representa o MDE de entrada na ottobacia do ponto; os polígonos externos agregados por `include_upstream` não ampliam o recorte. Consulte o schema `TopographyOverlay` em OpenAPI.
+
+`GET /api/coords_join/:lat/:lon?partial_basin=false&include_topography=true` permite visualizar a topografia da ottobacia inteira sem executar a delimitação D8. `include_topography` é independente de `partial_basin`, vale true por padrão e aceita false/0 para não gerar a imagem. A geometria e as vazões do modo integral não são alteradas.
+
+Os campos numéricos principais de vazão, área e volume são brutos, sem arredondamento para a interface. A apresentação usa casas adaptativas para valores pequenos. Na regularização, nomes gerados automaticamente também preservam a leitura de demandas positivas pequenas. Campos legados com sufixo `_rounded` são apenas alternativas explícitas de exibição; não os usar como entrada dos cálculos.
+
+## Microbacias de uma ottobacia
+
+`GET /api/ottobacias/:cod/microbasins?min_drainage_area_km2=0.1` retorna `FeatureCollection` de unidades incrementais D8 com `metadata`. `kind=stream_reach` identifica microbacias por trecho; `kind=residual_outlet` identifica saídas sem passagem pela rede acima do limiar. `downstream_unit_id` liga as unidades e não é ottocódigo. As feições são disjuntas, recortadas à ottobacia e não incluem bacias externas. O limiar é positivo, em km², e vale `DEM_MIN_DRAINAGE_AREA_KM2` ou 0,1 por padrão. Cache HIT/MISS por header; 400 para limiar inválido, 404 para código ausente, 422 para dados inválidos/ciclos/limites espaciais, 429 para rate limit e 503 para indisponibilidade/ocupação/limite de execução. Ver OpenAPI e [metodologia detalhada](DEM_DELINEATION.md).
+
+### Memorial da consulta
+
+`GET /api/coords_join/:lat/:lon` e `POST /api/geometry_calculate` incluem `calculation_memorial`: área final, interseções das isoietas, regiões RAU/XYZ, denominadores das ponderações, coeficientes utilizados e fatores f95/X10 com vazões por região, além dos resultados finais. O modal **Ver memorial de cálculo** apresenta essas etapas da consulta corrente com fórmulas e unidades. A memória usa os parâmetros da resposta; a apresentação arredonda valores, sem alterar as equações ou entradas de cálculo.

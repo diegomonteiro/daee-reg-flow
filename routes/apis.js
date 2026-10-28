@@ -6,8 +6,10 @@ var debug   = require('debug')('daee-reg-flow:api');
 var _ = require('lodash');
 
 const regflow = require('../models/regflow');
+const calculationMemorial = require('../services/calculation-memorial');
+const numericFormat = require('../public/javascripts/numbers');
 
-require("dotenv").config();
+require('dotenv').config({ path: require('node:path').join(__dirname, '..', '.env') });
 
 var municipios_json  = require('../public/layers/municipios.json');
 var ottobacias_json  = require('../public/layers/ottobacias.json');
@@ -48,6 +50,15 @@ function collectUpstreamBasinCodes(startCode) {
         }
     }
     return upstreamCodes;
+}
+
+const streamBounds = ottotrechos_json.features.map(feature => ({ feature, bbox: turf.bbox(feature) }));
+
+function getIntersectingStreams(geometry) {
+    const bounds = turf.bbox(geometry);
+    return streamBounds
+        .filter(item => boundsIntersect(bounds, item.bbox) && turf.booleanIntersects(geometry, item.feature))
+        .map(item => item.feature);
 }
 
 const basinBounds = ottobacias_json.features.map(feature => ({ feature, bbox: turf.bbox(feature) }));
@@ -249,13 +260,13 @@ function isFirstEndpointUpstreamByTopology(segment, endpoints) {
     return true;
 }
 
-async function enrichStreamSegments(segments) {
+async function enrichStreamSegments(segments, includeElevation = true) {
     return Promise.all((segments || []).map(async segment => {
         const endpoints = getLineEndpoints(segment);
         if (!endpoints) return segment;
         const [firstElevation, lastElevation] = await Promise.all([
-            regflow.getElevationByCoords(endpoints.first[1], endpoints.first[0]),
-            regflow.getElevationByCoords(endpoints.last[1], endpoints.last[0])
+            includeElevation ? regflow.getElevationByCoords(endpoints.first[1], endpoints.first[0]) : null,
+            includeElevation ? regflow.getElevationByCoords(endpoints.last[1], endpoints.last[0]) : null
         ]);
         const firstMeters = firstElevation && Number.isFinite(firstElevation.max) ? firstElevation.max : null;
         const lastMeters = lastElevation && Number.isFinite(lastElevation.max) ? lastElevation.max : null;
@@ -473,7 +484,7 @@ async function calculateGeometry(geometry, options = {}) {
 
     const center = turf.centroid(geometry).geometry.coordinates;
     const altitude = options.includeElevation === false ? null : await regflow.getElevationByCoords(center[1], center[0]);
-    const streamSegments = await enrichStreamSegments(options.ottotrecho || []);
+    const streamSegments = await enrichStreamSegments(options.ottotrecho || (options.includeIntersectingStreams ? getIntersectingStreams(geometry) : []), options.includeElevation !== false);
     const intersectingBasins = options.includeBasinOverlaps ? getIntersectingBasins(geometry, areaKm2) : [];
     return {
         source: options.source || 'geometry',
@@ -1043,7 +1054,7 @@ router.post('/regularization_simulation', limitCoordinateRequests, function(req,
                 throw validationError;
             }
 
-            const defaultName = `Cenário ${idx + 1} — QF ${calc.qf_m3s.toFixed(2).replace('.', ',')} m³/s · ${Number(calc.failure_probability_percent.toFixed(2)).toString().replace('.', ',')}% (T=${Number(calc.return_period_years.toFixed(1)).toString().replace('.', ',')} anos)`;
+            const defaultName = `Cenário ${idx + 1} — QF ${numericFormat.format(calc.qf_m3s)} m³/s · ${Number(calc.failure_probability_percent.toFixed(2)).toString().replace('.', ',')}% (T=${Number(calc.return_period_years.toFixed(1)).toString().replace('.', ',')} anos)`;
             return {
                 id: String(item.id || `reg-scenario-${idx + 1}`).slice(0, 80),
                 name: String(item.name || defaultName).trim().slice(0, 120),
@@ -1183,10 +1194,43 @@ router.post('/isohyet_simulation', limitCoordinateRequests, function(req, res, n
 router.post('/geometry_calculate', limitCoordinateRequests, function(req, res, next) {
     async function run() {
         const validated = validateBasinGeometry(req.body && req.body.geometry, { allowOfficialBasin: true });
-        const response = await calculateGeometry(validated.geometry, { source: 'drawn-geometry', includeElevation: false, includeBasinOverlaps: true });
+        const response = await calculateGeometry(validated.geometry, { source: 'drawn-geometry', includeElevation: false, includeBasinOverlaps: true, includeIntersectingStreams: true });
+        response.calculation_memorial = calculationMemorial(response);
         res.status(200).json(response);
     }
     run().catch(next);
+});
+
+const delineateDem = require('../services/dem-delineation').createDelineator();
+router.get('/ottobacias/:cod/microbasins', limitCoordinateRequests, async function(req,res,next) {
+    const area = Number(req.query.min_drainage_area_km2 === undefined ? (process.env.DEM_MIN_DRAINAGE_AREA_KM2 || 0.1) : req.query.min_drainage_area_km2);
+    if (!Number.isFinite(area) || area <= 0) return res.status(400).json({error:'min_drainage_area_km2 deve ser positivo.'});
+    const basin = ottobaciasByCode[req.params.cod];
+    if (!basin) return res.status(404).json({error:'Ottobacia não encontrada.'});
+    try {
+        const result = await delineateDem.microbasins(basin,area);
+        res.set('X-Cache',result.cache).json(result.value);
+    } catch(error) {
+        if(error.status) return res.status(error.status).json({error:error.message});
+        next(error);
+    }
+});
+
+router.get('/dem_delineation/:lat/:lon', limitCoordinateRequests, async function(req, res, next) {
+    const lat = Number(req.params.lat);
+    const lon = Number(req.params.lon);
+    if (!Number.isFinite(lat) || !Number.isFinite(lon) || Math.abs(lat) > 90 || Math.abs(lon) > 180) {
+        return res.status(400).json({ error: 'Coordenadas inválidas.' });
+    }
+    const basin = findContainingFeature(basinBounds, turf.point([lon, lat]), lon, lat);
+    if (!basin) return res.status(404).json({ error: 'Ottobacia não encontrada.' });
+    try {
+        res.json(await delineateDem(basin, [lon, lat], ottotrechosByBasin[basin.properties.COBACIA] || [],
+            (upstreamCodesByJusante[basin.properties.COBACIA] || []).map(code => ottobaciasByCode[code]).filter(Boolean)));
+    } catch (error) {
+        if (error.status) return res.status(error.status).json({ error: error.message });
+        next(error);
+    }
 });
 
 router.get('/coords_join/:lat/:lon', limitCoordinateRequests, function(req,res,next){
@@ -1194,9 +1238,10 @@ router.get('/coords_join/:lat/:lon', limitCoordinateRequests, function(req,res,n
         var lat = parseFloat(req.params['lat']);
         var lon = parseFloat(req.params['lon']);
         const includeUpstream = req.query.include_upstream === 'true' || req.query.include_upstream === '1';
+        const includeTopography = !(req.query.include_topography === 'false' || req.query.include_topography === '0');
         const partialBasin = !(req.query.partial_basin === 'false' || req.query.partial_basin === '0');
 
-        const cacheKey = `${lat.toFixed(5)},${lon.toFixed(5)},${includeUpstream ? 'up' : 'single'},${partialBasin ? 'part' : 'full'}`;
+        const cacheKey = `${lat},${lon},dem-nearest:${process.env.DEM_MIN_DRAINAGE_AREA_KM2 || 0.1},${includeTopography ? 'topo' : 'no-topo'},${includeUpstream ? 'up' : 'single'},${partialBasin ? 'part' : 'full'}`;
         const cached = coordinateCache.get(cacheKey);
         if (cached && Date.now() - cached.createdAt < CACHE_TTL_MS) {
             res.set('X-Cache', 'HIT');
@@ -1252,18 +1297,42 @@ router.get('/coords_join/:lat/:lon', limitCoordinateRequests, function(req,res,n
 
         //Find Ottotrecho por Ottobacia
         const startBasinCode = String(ottobacia_obj.properties.COBACIA);
-        const upstreamBasinCodes = collectUpstreamBasinCodes(startBasinCode);
+        let upstreamBasinCodes = collectUpstreamBasinCodes(startBasinCode);
         ottotrecho_obj = await enrichStreamSegments(ottotrechosByBasin[startBasinCode] || []);
         const fullBasinAreaKm2 = turf.area(ottobacia_obj) / 1000000;
-        const splitResult = partialBasin
-            ? splitBasinUpstreamByPoint(ottobacia_obj, ottotrecho_obj, lat, lon)
-            : {
-                upstreamBasin: ottobacia_obj,
-                fullAreaKm2: fullBasinAreaKm2,
-                upstreamAreaKm2: fullBasinAreaKm2,
-                areaProportion: 1,
-                crossSection: null
-            };
+        let demResult = null;
+        let topographyResult = null;
+        if (partialBasin) {
+            try {
+                demResult = await delineateDem(ottobacia_obj, [lon, lat], ottotrechosByBasin[startBasinCode] || [],
+                    (upstreamCodesByJusante[startBasinCode] || []).map(code => ottobaciasByCode[code]).filter(Boolean), { includeTopography });
+                topographyResult = demResult;
+            } catch (error) {
+                if (error.status) return res.status(error.status).json({ error: error.message });
+                throw error;
+            }
+            upstreamBasinCodes = [...new Set(demResult.contributing_upstream_codes.flatMap(code =>
+                [code, ...collectUpstreamBasinCodes(code)]))].filter(code => code !== startBasinCode);
+        }
+        if (!partialBasin && includeTopography) {
+            try {
+                topographyResult = await delineateDem.topography(ottobacia_obj);
+            } catch (error) {
+                topographyResult = { topography: null, topography_warning: error.message };
+            }
+        }
+        const localBasin = demResult ? { ...demResult.contributing_area,
+            properties: { ...ottobacia_obj.properties, is_upstream_subbasin: true, delineation_method: demResult.method }
+        } : ottobacia_obj;
+        const localAreaKm2 = turf.area(localBasin) / 1000000;
+        const splitResult = {
+            upstreamBasin: localBasin,
+            fullAreaKm2: fullBasinAreaKm2,
+            upstreamAreaKm2: localAreaKm2,
+            areaProportion: fullBasinAreaKm2 > 0 ? Math.min(localAreaKm2 / fullBasinAreaKm2, 1) : 1,
+            crossSection: demResult ? { line: demResult.divide, stream_point: demResult.snapped_point,
+                method: demResult.method, snap_distance_m: demResult.snap_distance_m } : null
+        };
         let ottobacia_full_obj = ottobacia_obj;
         ottobacia_obj = splitResult.upstreamBasin;
         let totalUpstreamAreaKm2 = splitResult.upstreamAreaKm2;
@@ -1387,6 +1456,7 @@ router.get('/coords_join/:lat/:lon', limitCoordinateRequests, function(req,res,n
             longitude: lon,
             include_upstream: includeUpstream,
             partial_basin: partialBasin,
+            include_topography: includeTopography,
             available_upstream_basins_count: upstreamBasinCodes.length,
             upstream_basins: upstreamBasinsSummary,
             area_km2: area_calc,
@@ -1394,6 +1464,14 @@ router.get('/coords_join/:lat/:lon', limitCoordinateRequests, function(req,res,n
             area_proportion: totalAreaProportion,
             ottobacia_full: ottobacia_full_obj,
             cross_section: splitResult.crossSection,
+            topography: topographyResult ? topographyResult.topography : null,
+            topography_warning: topographyResult ? topographyResult.topography_warning : null,
+            delineation: demResult ? { method: demResult.method, snap_method: demResult.snap_method,
+                snapped_point: demResult.snapped_point, snap_distance_m: demResult.snap_distance_m,
+                min_drainage_area_km2: demResult.min_drainage_area_km2,
+                distance_to_official_stream_m: demResult.distance_to_official_stream_m,
+                contributing_upstream_codes: demResult.contributing_upstream_codes,
+                resolution_m: demResult.resolution_m, warnings: demResult.warnings } : null,
             altitude: altitude_calc,
             rxyz: region_coefs.rxyz,
             rau: region_coefs.rau,
@@ -1407,6 +1485,7 @@ router.get('/coords_join/:lat/:lon', limitCoordinateRequests, function(req,res,n
             qmin: qmin_calc
         };
 
+        response.calculation_memorial = calculationMemorial(response);
         coordinateCache.set(cacheKey, { createdAt: Date.now(), value: response });
         if (coordinateCache.size > 500) {
             const oldestKey = coordinateCache.keys().next().value;

@@ -25,12 +25,12 @@ flowchart TB
     end
 
     subgraph SpatialStore["Camadas Geoespaciais Carregadas em Memória (public/layers/)"]
-        Ottobacias["ottobacias_sp.json + Índice BBox (basinBounds) + ottobaciasByCode"]
-        Ottotrechos["ottotrechos_sp.json + ottotrechosByBasin + Árvore Pfafstetter (upstreamBasinsByDownstream)"]
+        Ottobacias["ottobacias.json + Índice BBox (basinBounds) + ottobaciasByCode"]
+        Ottotrechos["ottotrechos.json + ottotrechosByBasin + Árvore Pfafstetter (upstreamBasinsByDownstream)"]
         RAU["rau.json (21 Regiões Hidrológicas A..U)"]
         RXYZ["rxyz.json (Regiões X, Y, Z — Parâmetro C)"]
         Isoietas["rain_isoline.json (Isoietas Históricas Pré-1980)"]
-        LimiteSP["limite_sp.json + municipios_sp.json"]
+        LimiteSP["limite_estadual_sp.json + municipios.json"]
     end
 
     subgraph External["Serviços Externos (Opcionais / Mapas)"]
@@ -64,7 +64,7 @@ daee-reg-flow/
 │   └── regflow.js                 # Núcleo matemático e geoespacial da metodologia DAEE (1988)
 ├── routes/
 │   ├── index.js                   # Rotas de páginas (GET /, GET /api-docs, GET /api/docs)
-│   └── apis.js                    # Endpoints REST (/api/*), índices espaciais, corte transversal e simulações
+│   └── apis.js                    # Endpoints REST (/api/*), índices espaciais, integração MDE e simulações
 ├── views/
 │   ├── index.ejs                  # Aplicação principal (Mapa interativo, Sidebar colapsável, Modais de simulação)
 │   ├── api-docs.ejs               # Página interativa do Swagger UI (/api-docs)
@@ -75,10 +75,10 @@ daee-reg-flow/
 │   │   └── style.css              # Folha de estilos única (layout responsivo, painéis colapsáveis, modais)
 │   ├── images/                    # Identidade visual institucional (SP-ÁGUAS)
 │   └── layers/                    # Base cartográfica oficial em GeoJSON (carregada na inicialização)
-│       ├── limite_sp.json         # Polígono do limite estadual de São Paulo
-│       ├── municipios_sp.json     # Polígonos dos 645 municípios paulistas
-│       ├── ottobacias_sp.json     # Polígonos das ottobacias hidrográficas (COBACIA)
-│       ├── ottotrechos_sp.json    # Rede de drenagem (COBACIA, COBACIAJUS, NOCOMPLETO, NUCOMPTREC)
+│       ├── limite_estadual_sp.json         # Polígono do limite estadual de São Paulo
+│       ├── municipios.json     # Polígonos dos 645 municípios paulistas
+│       ├── ottobacias.json     # Polígonos das ottobacias hidrográficas (COBACIA)
+│       ├── ottotrechos.json    # Rede de drenagem (COBACIA, COBACIAJUS, NOCOMPLETO, NUCOMPTREC)
 │       ├── rain_isoline.json      # Faixas de isoietas médias anuais históricas (propriedade ID em mm)
 │       ├── rau.json               # Polígonos das 21 regiões hidrológicas homogêneas (A a U)
 │       └── rxyz.json              # Polígonos das 3 regiões do parâmetro C de 7 dias (X, Y, Z)
@@ -105,7 +105,7 @@ Na inicialização do processo Node.js, `routes/apis.js` pré-processa as camada
 2. **`ottobaciasByCode` (`Map<string, Feature>`)**:
    - Indexa cada ottobacia por `String(feature.properties.COBACIA)` em $O(1)$, essencial para montar a árvore de bacias à montante.
 3. **`ottotrechosByBasin` (`Object<string, Feature[]>`)**:
-   - Agrupa os segmentos de curso d'água (`ottotrechos_sp.json`) pelo código `COBACIA` em $O(1)$.
+   - Agrupa os segmentos de curso d'água (`ottotrechos.json`) pelo código `COBACIA` em $O(1)$.
 4. **`upstreamBasinsByDownstream` (`Map<string, Set<string>>`)**:
    - Grafo direcionado reverso construído a partir dos atributos `COBACIA` (bacia atual) e `COBACIAJUS` (bacia imediatamente à jusante) dos ottotrechos.
    - Permite que `collectUpstreamBasinCodes(startCode)` percorra em busca em largura (BFS) todas as ottobacias tributárias à montante até as cabeceiras em menos de `1 ms`, com proteção contra ciclos (`visited`).
@@ -123,21 +123,21 @@ sequenceDiagram
 
     U->>API: GET /api/coords_join/:lat/:lon?partial_basin=true&include_upstream=false
     API->>API: Valida coordenadas + verifica Cache LRU (coordinateCache, TTL 15 min)
-    API->>Geo: Verifica se ponto está em limite_sp.json
+    API->>Geo: Verifica se ponto está em limite_estadual_sp.json
     API->>Geo: Localiza ottobacia via basinBounds (findContainingFeature)
     API->>Geo: Obtém ottotrechos da ottobacia + classifica Montante/Jusante
     alt partial_basin == true (Padrão)
-        API->>Geo: splitBasinUpstreamByPoint() -> Projeta ponto no rio, traça corda transversal e recorta sub-bacia à montante
+        API->>Geo: delineateDem() -> Ajusta à drenagem D8 mais próxima sem raio e delimita a contribuição local
     else partial_basin == false
         API->>Geo: Mantém 100% do polígono da ottobacia (area_proportion = 1)
     end
     opt include_upstream == true
-        API->>Geo: collectUpstreamBasinCodes() -> Une sub-bacia do ponto + todas as ottobacias à montante até a nascente
+        API->>Geo: Verifica entradas D8 contribuintes e expande seus ramos via collectUpstreamBasinCodes()
     end
     API->>Hydro: getRegionsCoeficientsByGeometry() -> Intersecta bacia com RAU, RXYZ e Isoietas
     Hydro-->>API: Coeficientes ponderados por área (A_MEDIA, B_MEDIA, A, B, C, XT, Chuva Média)
     API->>Hydro: Calcula Q_média (Eq. 1), Q95% (Eq. 18) e Q7,10 (Eq. 22)
-    API-->>U: JSON completo (polígonos, seção transversal, trechos, coeficientes e vazões)
+    API-->>U: JSON completo (polígonos, divisor MDE, exutório ajustado, trechos, coeficientes e vazões)
 ```
 
 ---
@@ -171,3 +171,17 @@ A interface principal utiliza HTML5 semântico (`<header>`, `<main class="worksp
   - `#regularization-dialog`: Simulador completo de Volume de Regularização Intra-Anual (Equações 12 a 15 do DAEE), com suporte à vazão calculada da bacia (`value="calculated"`), catálogo regional (`A`–`U`), exemplo do Rio Buquira, memória de cálculo e gráfico vetorial SVG da Figura 4.
   - `#simulation-dialog` + `#isohyet-editor`: Simulador comparativo de até 6 cenários de isoietas e editor cartográfico interativo de faixas de precipitação.
 
+
+## Delimitador MDE das consultas parciais
+
+`services/dem-delineation.js` executa `scripts/hydrology/delineate.py` em subprocesso assíncrono, usando rasters D8/acumulação preparados offline por GDAL e GRASS. Os endpoints `/api/coords_join/:lat/:lon` (modo parcial) e `/api/dem_delineation/:lat/:lon` compartilham o delimitador D8 e o rate limit. O cache considera coordenadas exatas, modo e limiar de drenagem; não há fallback para corda reta. Uma tarefa por processo; janela máxima de 4 milhões de células; execução máxima de 8,5 s. Dados derivados em `data/hydrology/` fora da área pública. Consulte [algoritmo, provisionamento e limitações](DEM_DELINEATION.md).
+
+`scripts/hydrology/topography.py` gera o recorte visual da elevação de entrada na mesma tarefa Python. A janela é reduzida e reprojetada para Web Mercator, com máscara e transparência, e retorna PNG em data URI com bounds WGS84 no campo `topography`. O frontend usa `L.imageOverlay` em pane abaixo dos vetores, legenda e opacidade. A imagem é cacheada com a resposta de coordenadas; não há endpoint de leitura arbitrária de arquivos ou recortes persistentes por requisição.
+
+A opção `include_topography` integra a chave do cache. No modo integral, `delineateDem.topography()` executa apenas o CLI de `topography.py`, compartilhando o limite de concorrência do serviço, mas sem carregar direção/acumulação nem executar o grafo D8. Falhas visuais retornam aviso na resposta integral, preservando o cálculo hidrológico.
+
+O método `delineateDem.microbasins()` compartilha o limite de concorrência do serviço Python e chama `microbasins.py`. A API por código de ottobacia usa os índices oficiais existentes e um cache LRU próprio (8 resultados / 16 MB serializados, TTL 15 min, invalidado por tamanho/mtime dos rasters). O frontend adiciona uma camada vetorial de microbacias/residuais e protege respostas obsoletas com AbortController e contador de geração. A visualização não altera o resultado hidrológico da consulta por ponto.
+
+### Hidrografia completa por WMS
+
+O seletor de camadas inclui a sobreposição opcional **Hidrografia completa (DAEE)**, desativada inicialmente. Usa `https://geodados.daee.sp.gov.br/geoserver/wms`, camada `sibh:hidrografia_completa`, WMS 1.3.0, PNG transparente. O Leaflet calcula BBOX e dimensões dos tiles em EPSG:3857 conforme a navegação. A camada fica acima das camadas temáticas e abaixo dos ottotrechos selecionados; não intercepta cliques nem altera cálculos. A política CSP permite imagens e conexões ao domínio oficial. A disponibilidade e o estilo da hidrografia dependem do servidor WMS.

@@ -10,7 +10,7 @@
   <link rel="preconnect" href="https://tile.openstreetmap.org">
   <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin="anonymous">
   <link rel="stylesheet" href="https://unpkg.com/@geoman-io/leaflet-geoman-free@2.20.0/dist/leaflet-geoman.css">
-  <link rel="stylesheet" href="<%= basePath %>/stylesheets/style.css?v=20261024a">
+  <link rel="stylesheet" href="<%= basePath %>/stylesheets/style.css?v=20261027contourlabels1">
 </head>
 <body>
   <header class="app-header">
@@ -46,7 +46,17 @@
         <label class="upstream-option" for="partial-basin">
           <input type="checkbox" id="partial-basin" checked>
           <span class="upstream-check" aria-hidden="true"></span>
-          <span>Cálculo parcial da bacia (somente área à montante do ponto; desmarque para ottobacia inteira)</span>
+          <span>Cálculo parcial por MDE (área contribuinte ao exutório ajustado; desmarque para ottobacia inteira)</span>
+        </label>
+        <label class="upstream-option" for="show-isohyets">
+          <input type="checkbox" id="show-isohyets" checked>
+          <span class="upstream-check" aria-hidden="true"></span>
+          <span>Exibir isoietas no mapa</span>
+        </label>
+        <label class="upstream-option" for="show-topography">
+          <input type="checkbox" id="show-topography" checked>
+          <span class="upstream-check" aria-hidden="true"></span>
+          <span>Ver topografia considerada</span>
         </label>
         <label class="upstream-option" for="include-upstream">
           <input type="checkbox" id="include-upstream">
@@ -95,9 +105,11 @@
       <div class="results-empty" id="results-empty"><div class="empty-icon"><svg viewBox="0 0 24 24"><path d="M12 21s7-5.2 7-12a7 7 0 1 0-14 0c0 6.8 7 12 7 12Z"/><circle cx="12" cy="9" r="2.5"/></svg></div><h3>Selecione um ponto</h3><p>Preencha as coordenadas ou clique no mapa para calcular as vazões da bacia correspondente.</p></div>
       <div class="results-loading" id="results-loading" hidden aria-live="polite"><div class="loading-mark"></div><h3>Analisando a bacia</h3><p>Cruzando limites, precipitação e regiões hidrológicas.</p><div class="skeleton-list"><i></i><i></i><i></i><i></i></div></div>
       <div class="results-content" id="results-content" hidden>
+        <p class="dem-delineation-info" id="dem-delineation-info" role="status" hidden></p>
         <dl class="parameter-list"><div><dt>Bacia</dt><dd id="result-basin">—</dd></div><div><dt>Área da bacia</dt><dd id="result-area">—</dd></div><div><dt>Curso d’água</dt><dd id="result-watercourse">—</dd></div><div><dt>Extensão do trecho</dt><dd id="result-stream-length">—</dd></div><div><dt>Ponto montante</dt><dd id="result-upstream">—</dd></div><div><dt>Ponto jusante</dt><dd id="result-downstream">—</dd></div><div><dt>Região A/U</dt><dd id="result-rau">—</dd></div><div><dt>Região XYZ</dt><dd id="result-rxyz">—</dd></div></dl>
         <section class="basin-overlaps" id="upstream-basins-section" hidden aria-labelledby="upstream-basins-title"><div><h3 id="upstream-basins-title">Ottobacias à montante</h3><span id="upstream-basins-count"></span></div><p id="upstream-basins-description">Agregação hidrográfica pela ottocodificação (montante/jusante) até a nascente.</p><ol id="upstream-basins-list"></ol></section>
         <section class="basin-overlaps" id="basin-overlaps" hidden aria-labelledby="basin-overlaps-title"><div><h3 id="basin-overlaps-title">Ottobacias na área desenhada</h3><span id="basin-overlaps-count"></span></div><p>Participação de cada ottobacia na área desenhada e percentual da própria ottobacia coberto pelo desenho.</p><ol id="basin-overlaps-list"></ol></section>
+        <button class="simulation-trigger" id="open-memorial" type="button">Ver memorial de cálculo</button>
         <details class="coefficients"><summary>Ver coeficientes do cálculo</summary><dl class="parameter-list compact"><div><dt>A Média</dt><dd id="result-avg-a">—</dd></div><div><dt>B Média</dt><dd id="result-avg-b">—</dd></div><div><dt>Coeficiente a</dt><dd id="result-coef-a">—</dd></div><div><dt>Coeficiente b</dt><dd id="result-coef-b">—</dd></div><div><dt>Coeficiente c</dt><dd id="result-coef-c">—</dd></div></dl></details>
         <div class="metric-list">
           <article class="metric"><div class="metric-icon"><svg viewBox="0 0 24 24"><path d="M7 17a4 4 0 0 1-.5-8A6 6 0 0 1 18 10a3.5 3.5 0 0 1-.5 7H7Z"/><path d="m9 19-1 2M13 19l-1 2M17 19l-1 2"/></svg></div><div><span>Precipitação anual média</span><strong id="result-rain">—</strong></div></article>
@@ -105,6 +117,13 @@
           <article class="metric emphasis"><div class="metric-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M3 10c2 0 2-2 4-2s2 2 4 2 2-2 4-2 2 2 4 2"/><path d="m7 16 3 3 7-7"/></svg></div><div><span>Vazão Q95%</span><strong id="result-q95">—</strong></div></article>
           <article class="metric emphasis"><div class="metric-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><rect x="4" y="5" width="16" height="15" rx="2"/><path d="M8 3v4M16 3v4M4 10h16M8 14h.01M12 14h.01M16 14h.01"/></svg></div><div><span>Vazão Q<sub>7,10</sub></span><strong id="result-q710">—</strong></div></article>
         </div>
+        <section class="microbasins-panel" id="microbasins-panel" hidden>
+          <h3>Microbacias da ottobacia do ponto</h3>
+          <label class="field"><span>Área mínima para extrair a drenagem (km²)</span><input type="number" id="microbasin-min-area" min="0" step="any" value="0.1"></label>
+          <p>Separa contribuições por trecho nas confluências. Áreas que saem antes de alcançar a rede aparecem como residuais.</p>
+          <button class="button button-secondary" id="identify-microbasins" type="button">Identificar microbacias</button>
+          <p id="microbasins-status" role="status" aria-live="polite"></p>
+        </section>
         <p class="method-note">Estimativas produzidas pelo método de regionalização. Confirme premissas e limitações antes do uso técnico.</p>
         <button class="simulation-trigger regularization-trigger" id="open-regularization" type="button"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 7c2 0 2-2 4-2s2 2 4 2 2-2 4-2 2 2 4 2 2-2 2-2"/><path d="M3 13c2 0 2-2 4-2s2 2 4 2 2-2 4-2 2 2 4 2 2-2 2-2"/><path d="M5 19h14"/></svg><span>Simular regularização de vazão</span></button>
         <button class="simulation-trigger" id="open-simulation" type="button" disabled><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 19V9M10 19V5M16 19v-8M22 19H2"/><path d="m3 6 5-3 6 4 7-5"/></svg><span>Simular outras isoietas</span></button>
@@ -193,11 +212,11 @@
           </label>
           <label class="field" id="reg-q-direct-field">
             <span id="reg-q-direct-label">Vazão média plurianual Q̄ (m³/s)</span>
-            <input type="number" id="reg-avg-q" min="0.001" step="any" value="9.48">
+            <input type="number" id="reg-avg-q" min="0" step="any" value="9.48">
           </label>
           <label class="field" id="reg-area-field" hidden>
             <span>Área de drenagem (km²)</span>
-            <input type="number" id="reg-area-km2" min="0.01" step="any" value="401.5">
+            <input type="number" id="reg-area-km2" min="0" step="any" value="401.5">
           </label>
           <label class="field" id="reg-rain-field" hidden>
             <span>Precipitação anual média P̄ (mm/ano)</span>
@@ -223,7 +242,7 @@
         <div class="reg-builder-grid">
           <label class="field">
             <span>Vazão a regularizar Q<sub>F</sub> (m³/s)</span>
-            <input type="number" id="reg-qf-input" min="0.001" step="any" value="5.00" placeholder="Ex.: 5,00">
+            <input type="number" id="reg-qf-input" min="0" step="any" value="5.00" placeholder="Ex.: 5,00">
           </label>
           <label class="field">
             <span>Probabilidade de não atendimento y% (Período de retorno T)</span>
@@ -351,15 +370,20 @@
     </div>
   </dialog>
 
+  <dialog class="simulation-dialog memorial-dialog" id="memorial-dialog" aria-labelledby="memorial-title">
+    <div class="simulation-header"><div><p>Consulta atual · DAEE (1988)</p><h2 id="memorial-title">Memorial de cálculo</h2></div><button class="icon-button" id="close-memorial" type="button" aria-label="Fechar memorial">×</button></div>
+    <div class="simulation-body" id="memorial-body"></div>
+  </dialog>
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin="anonymous"></script>
   <script src="https://unpkg.com/@geoman-io/leaflet-geoman-free@2.20.0/dist/leaflet-geoman.min.js"></script>
+  <script src="<%= basePath %>/javascripts/numbers.js?v=20261027a"></script>
   <script>
   (() => {
     'use strict';
     const serverBasePath = <%- JSON.stringify(basePath || '') %>;
     const apiBase = serverBasePath || (location.pathname === '/reg-flow' || location.pathname.startsWith('/reg-flow/') ? '/reg-flow' : '');
     const byId = id => document.getElementById(id);
-    const form = byId('coordinate-form'), latInput = byId('latitude'), lonInput = byId('longitude'), partialBasinInput = byId('partial-basin'), includeUpstreamInput = byId('include-upstream');
+    const form = byId('coordinate-form'), latInput = byId('latitude'), lonInput = byId('longitude'), partialBasinInput = byId('partial-basin'), includeUpstreamInput = byId('include-upstream'), showTopographyInput = byId('show-topography'), showIsohyetsInput = byId('show-isohyets');
     const calculateButton = byId('calculate-button'), locateButton = byId('locate-button'), searchPanel = byId('search-panel');
     const resultsPanel = byId('results-panel'), empty = byId('results-empty'), loading = byId('results-loading'), content = byId('results-content');
     const drawToolbar = byId('draw-toolbar'), startDrawingButton = byId('start-drawing'), cancelDrawingButton = byId('cancel-drawing');
@@ -387,16 +411,158 @@
     map.pm.setGlobalOptions({ continueDrawing: false, snappable: true, allowSelfIntersection: false });
     L.control.zoom({ position: 'bottomleft' }).addTo(map); L.control.scale({ metric: true, imperial: false }).addTo(map);
     const layerControl = L.control.layers({ OpenStreetMap: osm, OpenTopoMap: topo, RapidEye: rapideye, Emplasa: emplasa, "Cartas IBGE": ibge, "Ortofotos IGC": igc, "Declividade": declivity }, {}, { position: 'bottomright' }).addTo(map);
+    map.createPane('hydrography');
+    map.getPane('hydrography').style.zIndex = '425';
+    map.getPane('hydrography').style.pointerEvents = 'none';
+    const fullHydrography = L.tileLayer.wms('https://geodados.daee.sp.gov.br/geoserver/wms', {
+      layers: 'sibh:hidrografia_completa', version: '1.3.0', format: 'image/png', transparent: true,
+      pane: 'hydrography', maxZoom: 19, attribution: 'DAEE / SP-ÁGUAS — Hidrografia completa'
+    });
+    layerControl.addOverlay(fullHydrography, 'Hidrografia completa (DAEE)');
+    map.createPane('demTopography');
+    map.getPane('demTopography').style.zIndex = '350';
+    map.getPane('demTopography').style.pointerEvents = 'none';
+    map.createPane('demContours');
+    map.getPane('demContours').style.zIndex = '420';
+    const demTopographyLayer = L.layerGroup();
+    const contourLabels = L.layerGroup();
+    let contourLabelFeatures = [];
+    function refreshContourLabels() {
+      contourLabels.clearLayers();
+      if (!map.hasLayer(demTopographyLayer)) return;
+      const occupied = [], size = map.getSize();
+      // Give master contours first choice; place labels by screen distance at each zoom.
+      const features = [...contourLabelFeatures].sort((a, b) => Number(b.properties.major) - Number(a.properties.major));
+      for (const feature of features) {
+        const coordinates = feature.geometry?.coordinates;
+        if (feature.geometry?.type !== 'LineString' || !coordinates?.length) continue;
+        const points = coordinates.map(p => map.latLngToContainerPoint([p[1], p[0]]));
+        let travelled = 0, next = 65;
+        for (let i = 1; i < points.length; i++) {
+          const a = points[i-1], b = points[i], length = a.distanceTo(b);
+          while (length > 0 && travelled + length >= next) {
+            const t = (next - travelled) / length;
+            const x = a.x + (b.x-a.x)*t, y = a.y + (b.y-a.y)*t;
+            next += 180;
+            if (x < 35 || y < 25 || x > size.x-35 || y > size.y-25 || occupied.some(p => Math.abs(p.x-x)<76 && Math.abs(p.y-y)<38)) continue;
+            occupied.push({x,y});
+            let angle = Math.atan2(b.y-a.y, b.x-a.x)*180/Math.PI;
+            if (angle > 90) angle -= 180;
+            if (angle < -90) angle += 180;
+            const elevation = Number(feature.properties.elevation_m);
+            if (!Number.isFinite(elevation)) continue;
+            L.marker(map.containerPointToLatLng([x,y]), {
+              pane: 'demContours', interactive: false, keyboard: false,
+              icon: L.divIcon({ className: 'contour-label', iconSize: [64,24], iconAnchor: [32,12],
+                html: `<span class="${feature.properties.major ? 'contour-label-major' : ''}" style="transform:rotate(${angle}deg)">${number(elevation, 0)} m</span>` })
+            }).addTo(contourLabels);
+          }
+          travelled += length;
+        }
+      }
+    }
+    map.on('moveend zoomend', refreshContourLabels);
+
+    layerControl.addOverlay(demTopographyLayer, 'Topografia considerada (MDE)');
+    const topographyLegend = L.control({ position: 'bottomleft' });
+    topographyLegend.onAdd = () => {
+      const legend = L.DomUtil.create('div', 'dem-topography-legend');
+      legend.id = 'dem-topography-legend'; legend.hidden = true;
+      legend.innerHTML = '<strong>Topografia considerada</strong><small>Ottobacia do ponto · cotas do MDE</small><div class="dem-topography-ramp"></div><div class="dem-topography-range"><span id="dem-topography-min"></span><span id="dem-topography-max"></span></div><small id="dem-topography-resolution"></small><small id="dem-topography-contours"></small><label>Opacidade <input id="dem-topography-opacity" type="range" min="0" max="100" value="75" aria-label="Opacidade da topografia"></label>';
+      L.DomEvent.disableClickPropagation(legend); L.DomEvent.disableScrollPropagation(legend);
+      legend.querySelector('input').addEventListener('input', event => {
+        demTopographyLayer.eachLayer(layer => layer.setOpacity?.(Number(event.target.value) / 100));
+      });
+      return legend;
+    };
+    topographyLegend.addTo(map);
+    map.on('overlayadd overlayremove', event => {
+      if (event.layer === demTopographyLayer) {
+        topographyLegend.getContainer().hidden = !map.hasLayer(demTopographyLayer) || !demTopographyLayer.getLayers().length;
+        refreshContourLabels();
+      }
+    });
+    function clearTopography() {
+      contourLabelFeatures = []; contourLabels.clearLayers();
+      demTopographyLayer.clearLayers();
+      if (map.hasLayer(demTopographyLayer)) map.removeLayer(demTopographyLayer);
+      topographyLegend.getContainer().hidden = true;
+    }
+    function renderTopography(topography) {
+      clearTopography();
+      if (!topography?.image || !Array.isArray(topography.bounds)) return;
+      const opacity = Number(byId('dem-topography-opacity').value) / 100;
+      L.imageOverlay(topography.image, topography.bounds, { pane: 'demTopography', opacity, interactive: false,
+        alt: 'Recorte do MDE de entrada usado na delimitação da ottobacia', className: 'dem-topography-image' }).addTo(demTopographyLayer);
+      if (topography.contours) L.geoJSON(topography.contours, {
+        pane: 'demContours',
+        style: feature => ({ color: feature.properties.major ? '#424242' : '#a3a3a3',
+          weight: feature.properties.major ? 1.35 : .75, opacity: feature.properties.major ? .85 : .65,
+          dashArray: feature.properties.major ? '7 4' : '4 4', lineCap: 'round', lineJoin: 'round' }),
+        onEachFeature: (feature, layer) => layer.bindTooltip(`${number(feature.properties.elevation_m, 0)} m`, { sticky: true })
+      }).addTo(demTopographyLayer);
+      contourLabelFeatures = topography.contours?.features || [];
+      contourLabels.addTo(demTopographyLayer);
+      text('dem-topography-contours', topography.contours_warning || 'Curvas tracejadas: 10 m · mestras: 50 m');
+      text('dem-topography-min', number(topography.display_min, 1));
+      text('dem-topography-max', number(topography.display_max, 1));
+      text('dem-topography-resolution', `Grade de entrada: ${number(topography.source_resolution_m[0], 0)} m`);
+      demTopographyLayer.addTo(map);
+      refreshContourLabels();
+      topographyLegend.getContainer().hidden = false;
+    }
     const fullBasinLayer = L.geoJSON(null, { style: { color: '#063f4c', weight: 2, opacity: .65, dashArray: '6 5', fillColor: '#087bbd', fillOpacity: .05 }, onEachFeature: (feature, layer) => { if (feature?.properties?.COBACIA) layer.bindTooltip(`Ottobacia ${feature.properties.COBACIA}`, { sticky: true }); } }).addTo(map);
     const basinLayer = L.geoJSON(null, { style: { color: '#087bbd', weight: 3, fillColor: '#2a9bd4', fillOpacity: .22 } }).addTo(map);
     const crossSectionLayer = L.layerGroup().addTo(map);
+    const microbasinColors = ['#086fc1','#d97706','#7c3aed','#059669','#dc2626','#0f766e','#c2410c'];
+    const microbasinLayer = L.geoJSON(null, {
+      style: feature => ({ color: feature.properties.kind === 'residual_outlet' ? '#526871' : microbasinColors[(feature.properties.unit_id-1)%microbasinColors.length],
+        weight: 1.5, fillOpacity: feature.properties.kind === 'residual_outlet' ? .12 : .3,
+        dashArray: feature.properties.kind === 'residual_outlet' ? '3 3' : null }),
+      onEachFeature: (feature, layer) => layer.bindTooltip(`${feature.properties.kind === 'stream_reach' ? 'Microbacia' : 'Área residual'} ${feature.properties.unit_id} · ${number(feature.properties.area_km2)} km²${feature.properties.downstream_unit_id ? ` · jusante: ${feature.properties.downstream_unit_id}` : ' · saída da ottobacia'}`, { sticky: true })
+    }).addTo(map);
+    layerControl.addOverlay(microbasinLayer, 'Microbacias D8 e áreas residuais');
+    let microController = null, microGeneration = 0;
+    function clearMicrobasins() {
+      microGeneration++; microController?.abort(); microController = null;
+      microbasinLayer.clearLayers();
+      byId('microbasins-status').textContent = '';
+      byId('identify-microbasins').disabled = false;
+    }
+    byId('identify-microbasins').onclick = async () => {
+      const basinCode = lastCalculation?.upstream_basins?.find(b => b.is_clicked_basin)?.COBACIA || lastCalculation?.ottobacia?.properties?.COBACIA;
+      const area = Number(byId('microbasin-min-area').value);
+      if (!basinCode || !Number.isFinite(area) || area <= 0) return toast('Informe uma área mínima de drenagem positiva.', 'error');
+      clearMicrobasins(); const generation = microGeneration;
+      microController = new AbortController(); byId('identify-microbasins').disabled = true;
+      text('microbasins-status', 'Identificando trechos, confluências e áreas contribuintes…');
+      try {
+        const response = await fetch(`${apiBase}/api/ottobacias/${encodeURIComponent(basinCode)}/microbasins?min_drainage_area_km2=${encodeURIComponent(area)}`, { signal: microController.signal });
+        const result = await response.json();
+        if (!response.ok) throw new Error(result.error || 'Não foi possível identificar as microbacias.');
+        if (generation !== microGeneration) return;
+        microbasinLayer.addData(result); if (!map.hasLayer(microbasinLayer)) microbasinLayer.addTo(map);
+        map.fitBounds(microbasinLayer.getBounds(), { padding: [42,42], maxZoom: 14 });
+        text('microbasins-status', `Ottobacia ${basinCode}: ${result.metadata.microbasins_count} microbacias por trecho; ${result.metadata.residual_count} áreas residuais em cinza. Limiar da rede: ${number(area)} km². As áreas podem ser menores que esse limiar. Contribuições locais, sem sobreposição. Faixas de borda não classificadas: ${number(result.metadata.unclassified_boundary_area_km2)} km².`);
+      } catch(error) {
+        if (generation === microGeneration && error.name !== 'AbortError') text('microbasins-status',error.message);
+      } finally {
+        if (generation === microGeneration) byId('identify-microbasins').disabled = false;
+      }
+    };
     const basinOverlapColors = ['#7c3aed', '#d97706', '#059669', '#dc2626', '#2563eb', '#9333ea', '#0f766e', '#c2410c'];
     const basinOverlapLayer = L.geoJSON(null, { style: feature => { const color = basinOverlapColors[feature.properties._display_index % basinOverlapColors.length]; return { color, weight: 2.5, fillColor: color, fillOpacity: .3 }; }, onEachFeature: (feature, layer) => layer.bindTooltip(`Ottobacia ${feature.properties.COBACIA} · ${percentage(feature.properties.drawn_area_percent)}% da área desenhada`, { sticky: true }) }).addTo(map);
     layerControl.addOverlay(fullBasinLayer, 'Ottobacia completa');
-    layerControl.addOverlay(crossSectionLayer, 'Seção transversal (corte)');
+    layerControl.addOverlay(crossSectionLayer, 'Divisor hidrológico (MDE)');
     layerControl.addOverlay(basinOverlapLayer, 'Ottobacias intersectadas');
-    const rainLayer = L.geoJSON(null, { style: f => ({ color: '#527986', weight: 1, dashArray: '4 4', fillColor: rainColor(f.properties.rain), fillOpacity: .18 }) }).addTo(map);
-    const streamLayer = L.geoJSON(null, { style: { color: '#0759c7', weight: 5, opacity: .9 }, onEachFeature: (feature, layer) => { const p = feature?.properties || {}; layer.bindTooltip(`${p.NOCOMPLETO || 'Ottotrecho'}${p.COBACIA ? ` · Ottobacia ${p.COBACIA}` : ''}`, { sticky: true }); } }).addTo(map);
+    map.createPane('isohyets');
+    map.getPane('isohyets').style.zIndex = '410';
+    map.createPane('isohyetEditor');
+    map.getPane('isohyetEditor').style.zIndex = '450';
+    map.createPane('streams');
+    map.getPane('streams').style.zIndex = '430';
+    const rainLayer = L.geoJSON(null, { pane: 'isohyets', style: f => ({ color: '#527986', weight: 1, dashArray: '4 4', fillColor: rainColor(f.properties.rain), fillOpacity: .18 }) }).addTo(map);
+    const streamLayer = L.geoJSON(null, { pane: 'streams', style: { color: '#0759c7', weight: 5, opacity: .9 }, onEachFeature: (feature, layer) => { const p = feature?.properties || {}; layer.bindTooltip(`${p.NOCOMPLETO || 'Ottotrecho'}${p.COBACIA ? ` · Ottobacia ${p.COBACIA}` : ''}`, { sticky: true }); } }).addTo(map);
     const streamEndpointLayer = L.layerGroup().addTo(map);
     let marker = null, controller = null, isDrawing = false, lastCalculation = null, isIsohyetEditing = false, drawingAdjustmentRegion = false;
     let catalogIsohyets = [], uploadedIsohyets = [], simulationMapLayers = [];
@@ -404,7 +570,7 @@
     const scenarioColors = ['#086fc1', '#d97706', '#7c3aed', '#059669', '#dc2626', '#526871'];
 
     function rainColor(v) { return v > 2250 ? '#6954c6' : v > 1750 ? '#1589c9' : v > 1450 ? '#18a277' : v > 1250 ? '#9dbb32' : '#e5a432'; }
-    function number(v, d = 2) { v = Number(v); return Number.isFinite(v) ? v.toLocaleString('pt-BR', { minimumFractionDigits: d, maximumFractionDigits: d }) : '—'; }
+    function number(v, d = 2) { return RegflowNumbers.format(v, d); }
     function percentage(v) { v = Number(v); return Number.isFinite(v) && v > 0 && v < .1 ? '< 0,1' : number(v, 1); }
     function text(id, value) { byId(id).textContent = value; }
     function toast(message, type = 'success') { text('toast-message', message); byId('toast').className = `toast ${type}`; byId('toast').hidden = false; clearTimeout(toast.timer); toast.timer = setTimeout(() => byId('toast').hidden = true, 5000); }
@@ -453,7 +619,7 @@
     }
     function renderStreams(segments) {
       streamLayer.clearLayers(); streamEndpointLayer.clearLayers();
-      if (!segments?.length) { text('result-watercourse', 'Não disponível para geometria desenhada'); text('result-stream-length', '—'); text('result-upstream', '—'); text('result-downstream', '—'); return; }
+      if (!segments?.length) { text('result-watercourse', 'Nenhum ottotrecho encontrado na área'); text('result-stream-length', '—'); text('result-upstream', '—'); text('result-downstream', '—'); return; }
       streamLayer.addData({ type: 'FeatureCollection', features: segments });
       const names = [...new Set(segments.map(item => item.properties?.NOCOMPLETO).filter(Boolean))];
       const length = segments.reduce((sum, item) => sum + Number(item.properties?.NUCOMPTREC || 0), 0);
@@ -488,7 +654,68 @@
         copy.append(title, detail); item.append(swatch, copy); list.appendChild(item);
       });
     }
+    const memorialDialog = byId('memorial-dialog');
+    function openMemorial() {
+      const d = lastCalculation, m = d?.calculation_memorial;
+      if (!m) return toast('Calcule uma bacia para consultar o memorial.', 'error');
+      const root = byId('memorial-body'); root.replaceChildren();
+      const fmt = value => Number.isFinite(value) ? number(value, 8) : 'Não disponível';
+      function step(title, paragraphs, headers, rows) {
+        const section = document.createElement('section'); section.className = 'memorial-step';
+        const heading = document.createElement('h3'); heading.textContent = title; section.append(heading);
+        paragraphs.forEach(value => { const p = document.createElement('p'); p.textContent = value; section.append(p); });
+        if (headers) {
+          const wrap = document.createElement('div'); wrap.className = 'memorial-table-wrap';
+          const table = document.createElement('table'), head = document.createElement('thead'), tr = document.createElement('tr');
+          headers.forEach(value => { const th = document.createElement('th'); th.scope = 'col'; th.textContent = value; tr.append(th); }); head.append(tr); table.append(head);
+          const body = document.createElement('tbody');
+          rows.forEach(values => { const row = document.createElement('tr'); values.forEach(value => { const cell = document.createElement('td'); cell.textContent = value; row.append(cell); }); body.append(row); });
+          table.append(body); wrap.append(table); section.append(wrap);
+        }
+        root.append(section);
+      }
+      const origin = d.source === 'drawn-geometry' ? 'Polígono desenhado pelo usuário' : d.partial_basin ? 'Área contribuinte delimitada por MDE D8' : 'Ottobacia oficial inteira';
+      step('1. Delimitação e área de cálculo', [origin,
+        `Referência espacial da consulta: latitude ${fmt(d.latitude)}; longitude ${fmt(d.longitude)}${d.source === 'drawn-geometry' ? ' (centróide do desenho)' : ''}.`,
+        `Área geodésica da geometria final: A = ${fmt(m.area_km2)} km².`,
+        `Agregação de bacias a montante: ${d.include_upstream ? 'ativada' : 'desativada'}.`,
+        ...(d.delineation ? [`Exutório ajustado: ${d.delineation.snapped_point?.join(', ')}; deslocamento ${fmt(d.delineation.snap_distance_m)} m; resolução ${d.delineation.resolution_m?.join(' × ')} m.`, ...(d.delineation.warnings || [])] : [])],
+        d.upstream_basins?.length ? ['Ottobacia', 'Área contribuinte (km²)'] : null,
+        (d.upstream_basins || []).map(p => [String(p.code || p.COBACIA || p.basin_code || ''), fmt(p.upstream_area_km2 ?? p.area_km2)]));
+      step('2. Precipitação média ponderada', [
+        'P̄ = Σ(Pᵢ × Aᵢ) / ΣAᵢ. Os pesos são as áreas de interseção com as faixas de isoietas.',
+        `ΣAᵢ = ${fmt(m.weighting_areas_km2.rainfall)} km²; P̄ = ${fmt(m.rainfall_mm)} mm/ano.`],
+        ['Faixa', 'Pᵢ (mm/ano)', 'Aᵢ (km²)', 'Pᵢ × Aᵢ'], m.rainfall_bands.map((p,i)=>[i+1,fmt(p.rainfall_mm),fmt(p.area_km2),fmt(p.rainfall_mm*p.area_km2)]));
+      const c = m.coefficients;
+      step('3. Coeficientes regionais ponderados', [
+        'Para cada coeficiente: k̄ = Σ(kᵢ × Aᵢ) / ΣAᵢ, usando as interseções da respectiva camada.',
+        `RAU: ΣAᵢ = ${fmt(m.weighting_areas_km2.rau)} km². ā = ${fmt(c.avg_a)}; b̄ = ${fmt(c.avg_b)}; Ā = ${fmt(c.coef_a)}; B̄ = ${fmt(c.coef_b)}.`,
+        `XYZ: ΣAᵢ = ${fmt(m.weighting_areas_km2.xyz)} km². C̄ = ${fmt(c.coef_c)}.`],
+        ['Região RAU','Área (km²)','a','b','A','B'],m.regions.map(p=>[p.region,fmt(p.area_km2),fmt(p.avg_a),fmt(p.avg_b),fmt(p.coef_a),fmt(p.coef_b)]));
+      step('3.1. Interseções da camada XYZ', [], ['ID XYZ', 'Área (km²)', 'C'],m.xyz_regions.map(p=>[String(p.id),fmt(p.area_km2),fmt(p.coef_c)]));
+      step('4. Vazão média plurianual', [
+        'Q̄ = (ā + b̄ × P̄) × A / 1000. A divisão por 1000 converte L/s em m³/s.',
+        `Q̄ = (${fmt(c.avg_a)} + ${fmt(c.avg_b)} × ${fmt(m.rainfall_mm)}) × ${fmt(m.area_km2)} / 1000 = ${fmt(m.results.avg_discharge)} m³/s.`]);
+      step('5. Vazão de permanência Q95%', [
+        'Para cada região: Q95ᵢ = f95ᵢ × Q̄. Resultado final: Q95 = Σ(Q95ᵢ × Aᵢ) / ΣAᵢ.',
+        `Q95 = ${fmt(m.results.q95)} m³/s.`], ['Região','Área (km²)','f95','Q95ᵢ (m³/s)','Q95ᵢ × Aᵢ'],m.regions.map(p=>[p.region,fmt(p.area_km2),fmt(p.permanence_factor),fmt(p.q95),fmt(p.q95*p.area_km2)]));
+      step('6. Vazão mínima Q7,10', [
+        'Para cada região: Q7,10ᵢ = C̄ × X10ᵢ × (Aᵢ + Bᵢ) × Q̄. A e B nesta fórmula são coeficientes regionais.',
+        'Resultado final: Q7,10 = Σ(Q7,10ᵢ × áreaᵢ) / Σáreaᵢ. Período de retorno: 10 anos; duração: 7 dias.',
+        `Q7,10 = ${fmt(m.results.q710)} m³/s.`], ['Região','Área (km²)','X10','A','B','Q7,10ᵢ (m³/s)','Q7,10ᵢ × áreaᵢ'],m.regions.map(p=>[p.region,fmt(p.area_km2),fmt(p.xt10),fmt(p.coef_a),fmt(p.coef_b),fmt(p.q710),fmt(p.q710*p.area_km2)]));
+      step('7. Resultados e referência', [
+        `Q̄ = ${fmt(m.results.avg_discharge)} m³/s; Q95 = ${fmt(m.results.q95)} m³/s; Q7,10 = ${fmt(m.results.q710)} m³/s.`,
+        'Método: Regionalização Hidrológica do Estado de São Paulo — DAEE (1988). Camada pluviométrica: isoietas históricas (pré-1980).',
+        'Os denominadores das ponderações correspondem às áreas efetivamente cobertas por cada camada. Valores exibidos são arredondados apenas para apresentação; o cálculo usa a precisão numérica original.',
+        'Este memorial corresponde à consulta atual. Simulações de outras isoietas e de regularização possuem parâmetros e resultados próprios. Altitudes, curvas de nível e hidrografia de visualização não entram nas equações de regionalização.']);
+      memorialDialog.showModal(); root.scrollTop = 0;
+    }
+    byId('open-memorial').addEventListener('click', openMemorial);
+    byId('close-memorial').addEventListener('click', () => memorialDialog.close());
+    memorialDialog.addEventListener('click', event => { if (event.target === memorialDialog) memorialDialog.close(); });
     function render(data) {
+      clearMicrobasins();
+      byId('microbasins-panel').hidden = data.source === 'drawn-geometry' || !data.ottobacia?.properties?.COBACIA;
       lastCalculation = data;
       simulationButton.disabled = false;
       clearSimulationLayers();
@@ -501,16 +728,27 @@
       text('result-area', Number.isFinite(data.full_area_km2) && Number.isFinite(data.area_proportion) ? `${number(areaValue)} km² (${percentage(data.area_proportion * 100)}% de ${number(data.full_area_km2)} km²)` : `${number(areaValue)} km²`);
       text('result-rau', [...new Set((data.rau.bands || []).map(i => i.properties.region).filter(Boolean))].join(', ').toUpperCase() || '—'); text('result-rxyz', [...new Set((data.rxyz.bands || []).map(i => i.properties.id).filter(Boolean))].join(', ') || '—');
       [['avg-a',data.rau.avg_a],['avg-b',data.rau.avg_b],['coef-a',data.rau.coef_a],['coef-b',data.rau.coef_b],['coef-c',data.rxyz.coef_c]].forEach(([id,v]) => text(`result-${id}`, number(v,4)));
+      [['result-average', data.avg_discharge], ['result-q95', data.q95], ['result-q710', data.q710]].forEach(([id, value]) => {
+        byId(id).title = Number.isFinite(value) ? `Valor calculado: ${RegflowNumbers.input(value)} m³/s` : 'Valor indisponível';
+      });
       text('result-rain', `${number(data.isolines.avg_areas,1)} mm`); text('result-average', `${number(data.avg_discharge)} m³/s`); text('result-q95', `${number(data.q95)} m³/s`); text('result-q710', `${number(data.q710)} m³/s`);
       fullBasinLayer.clearLayers(); if (data.ottobacia_full) fullBasinLayer.addData(data.ottobacia_full);
       basinLayer.clearLayers().addData(data.ottobacia);
       crossSectionLayer.clearLayers();
+      renderTopography(data.topography);
       if (data.cross_section?.line) {
-        L.geoJSON(data.cross_section.line, { style: { color: '#e11d48', weight: 2.5, dashArray: '6 4', opacity: .95 } }).bindTooltip('Seção transversal (limite à montante)', { sticky: true }).addTo(crossSectionLayer);
-        if (Array.isArray(data.cross_section.stream_point)) L.circleMarker([data.cross_section.stream_point[1], data.cross_section.stream_point[0]], { radius: 5, color: '#fff', weight: 2, fillColor: '#e11d48', fillOpacity: 1 }).bindTooltip('Ponto projetado no trecho', { direction: 'top' }).addTo(crossSectionLayer);
+        L.geoJSON(data.cross_section.line, { style: { color: '#e11d48', weight: 2.5, dashArray: '6 4', opacity: .95 } }).bindTooltip('Divisor hidrológico (MDE)', { sticky: true }).addTo(crossSectionLayer);
       }
-      rainLayer.clearLayers(); (data.isolines.bands || []).forEach(b => rainLayer.addData(b)); renderStreams(data.ottotrecho); renderBasinOverlaps(data); renderUpstreamBasins(data); map.fitBounds((data.ottobacia_full ? fullBasinLayer : basinLayer).getBounds(), { padding: [42,42], maxZoom: 12 });
+      if (Array.isArray(data.cross_section?.stream_point)) L.circleMarker([data.cross_section.stream_point[1], data.cross_section.stream_point[0]], { radius: 5, color: '#fff', weight: 2, fillColor: '#e11d48', fillOpacity: 1 }).bindTooltip('Exutório ajustado à drenagem D8', { direction: 'top' }).addTo(crossSectionLayer);
+      rainLayer.clearLayers(); (data.isolines.bands || []).forEach(b => rainLayer.addData(b)); syncIsohyetVisibility(); renderStreams(data.ottotrecho); renderBasinOverlaps(data); renderUpstreamBasins(data); streamLayer.bringToFront();
+      const resultBoundsLayer = data.delineation ? basinLayer : (data.ottobacia_full ? fullBasinLayer : basinLayer);
+      map.fitBounds(resultBoundsLayer.getBounds(), { padding: [42,42], maxZoom: data.delineation ? 16 : 12 });
       syncMapBasinOptions(data);
+      const demInfo = byId('dem-delineation-info');
+      if (demInfo) {
+        demInfo.hidden = !data.delineation && !data.topography_warning;
+        demInfo.textContent = data.delineation ? `Delimitação por MDE · ajuste de ${number(data.delineation.snap_distance_m, 1)} m. ${[...(data.delineation.warnings || []), data.topography_warning].filter(Boolean).join(' ')}` : (data.topography_warning || '');
+      }
       loading.hidden = true; content.hidden = false; empty.hidden = true; openResults();
     }
     function renderUpstreamBasins(data) {
@@ -543,10 +781,11 @@
       });
     }
     async function calculate(lat, lon) {
-      controller?.abort(); controller = new AbortController(); setLoading(true);
+      controller?.abort(); controller = new AbortController(); clearTopography(); clearMicrobasins(); setLoading(true);
       const params = new URLSearchParams();
       if (includeUpstreamInput?.checked) params.set('include_upstream', 'true');
       if (partialBasinInput && !partialBasinInput.checked) params.set('partial_basin', 'false');
+      if (showTopographyInput && !showTopographyInput.checked) params.set('include_topography', 'false');
       const query = params.toString() ? `?${params.toString()}` : '';
       try { const response = await fetch(`${apiBase}/api/coords_join/${encodeURIComponent(lat)}/${encodeURIComponent(lon)}${query}`, { signal: controller.signal }); const data = await response.json().catch(() => ({})); if (!response.ok) throw new Error(data.error === 'Point outside SP' ? 'O ponto informado está fora do Estado de São Paulo.' : data.error || 'Não foi possível calcular para este ponto.'); render(data); toast('Cálculo realizado com sucesso.'); history.replaceState(null, '', `#${map.getZoom()}/${Number(lat).toFixed(6)}/${Number(lon).toFixed(6)}`); }
       catch (error) { if (error.name === 'AbortError') return; loading.hidden = true; empty.hidden = false; empty.querySelector('h3').textContent = 'Não foi possível calcular'; empty.querySelector('p').textContent = error.message; toast(error.message, 'error'); }
@@ -563,6 +802,7 @@
       lonInput.disabled = value;
       if (partialBasinInput) partialBasinInput.disabled = value;
       if (includeUpstreamInput) includeUpstreamInput.disabled = value;
+      if (showTopographyInput) showTopographyInput.disabled = value;
       locateButton.disabled = value;
       calculateButton.disabled = value;
       if (value) {
@@ -571,6 +811,8 @@
         fullBasinLayer.clearLayers();
         basinLayer.clearLayers();
         crossSectionLayer.clearLayers();
+        clearTopography();
+        clearMicrobasins();
         basinOverlapLayer.clearLayers();
         rainLayer.clearLayers();
         streamLayer.clearLayers(); streamEndpointLayer.clearLayers();
@@ -607,7 +849,7 @@
     }
     async function calculateDrawnGeometry(geometry, sourceLayer) {
       setDrawingMode(false);
-      controller?.abort(); controller = new AbortController(); setLoading(true);
+      controller?.abort(); controller = new AbortController(); clearTopography(); clearMicrobasins(); setLoading(true);
       try {
         const response = await fetch(`${apiBase}/api/geometry_calculate`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ geometry }), signal: controller.signal });
         const data = await response.json().catch(() => ({}));
@@ -639,7 +881,7 @@
     function renderIsohyetEditorLayer(data) {
       if (editingIsohyetGroup) map.removeLayer(editingIsohyetGroup);
       selectedIsohyetLayer = null; isohyetValue.disabled = true; byId('apply-isohyet-value').disabled = true; byId('toggle-isohyet-shape').disabled = true; byId('toggle-isohyet-shape').textContent = 'Editar forma';
-      editingIsohyetGroup = L.geoJSON(data, { style: feature => isohyetStyle(feature), onEachFeature: (_, layer) => layer.on('click', event => { L.DomEvent.stopPropagation(event); selectIsohyetLayer(layer); }) }).addTo(map);
+      editingIsohyetGroup = L.geoJSON(data, { pane: 'isohyetEditor', style: feature => isohyetStyle(feature), onEachFeature: (_, layer) => layer.on('click', event => { L.DomEvent.stopPropagation(event); selectIsohyetLayer(layer); }) }).addTo(map);
       if (lastCalculation?.ottobacia) map.fitBounds(L.geoJSON(lastCalculation.ottobacia).getBounds(), { padding: [70, 70], maxZoom: 10 });
     }
     async function openIsohyetEditor(scenario) {
@@ -679,9 +921,24 @@
       uploadedIsohyets.push({ id: `edited-${Date.now()}`, name, description: 'Cenário editado visualmente no mapa', source: 'upload', layer, size: new Blob([JSON.stringify(layer)]).size, edited: true });
       closeIsohyetEditor(true); toast('Cenário editado adicionado à simulação.');
     }
+    function syncIsohyetVisibility() {
+      const visible = showIsohyetsInput.checked;
+      [rainLayer, ...simulationMapLayers.map(item => item.layer)].forEach(layer => {
+        if (visible) layer.addTo(map);
+        else map.removeLayer(layer);
+      });
+      showIsohyetsInput.checked = visible;
+    }
+    showIsohyetsInput.addEventListener('change', syncIsohyetVisibility);
+    map.on('overlayadd overlayremove', event => {
+      if (simulationMapLayers.some(item => item.layer === event.layer)) {
+        showIsohyetsInput.checked = map.hasLayer(rainLayer) || simulationMapLayers.some(item => map.hasLayer(item.layer));
+      }
+    });
     function clearSimulationLayers() {
-      simulationMapLayers.forEach(item => { map.removeLayer(item.layer); layerControl.removeLayer(item.layer); });
+      const previousLayers = simulationMapLayers;
       simulationMapLayers = [];
+      previousLayers.forEach(item => { map.removeLayer(item.layer); layerControl.removeLayer(item.layer); });
     }
     function scenarioRow(scenario) {
       const label = document.createElement('label');
@@ -785,7 +1042,8 @@
       });
       clearSimulationLayers();
       scenarios.forEach((scenario, index) => {
-        const layer = L.geoJSON(scenario.bands, { style: { color: scenarioColors[index], weight: 2.2, opacity: .9, fillOpacity: .05, dashArray: index ? '7 5' : null } }).addTo(map);
+        const layer = L.geoJSON(scenario.bands, { pane: 'isohyets', style: { color: scenarioColors[index], weight: 2.2, opacity: .9, fillOpacity: .05, dashArray: index ? '7 5' : null } });
+        if (showIsohyetsInput.checked) layer.addTo(map);
         layerControl.addOverlay(layer, `Isoietas — ${scenario.name}`);
         simulationMapLayers.push({ layer, name: scenario.name });
       });
@@ -852,13 +1110,15 @@
     }
     function startNewConsultation() {
       controller?.abort(); controller = null;
+      if (memorialDialog.open) memorialDialog.close();
       if (simulationDialog.open) simulationDialog.close();
       if (isIsohyetEditing) closeIsohyetEditor(false);
       if (isDrawing) setDrawingMode(false);
       clearSimulationLayers();
       if (marker) { map.removeLayer(marker); marker = null; }
-      fullBasinLayer.clearLayers(); basinLayer.clearLayers(); crossSectionLayer.clearLayers(); basinOverlapLayer.clearLayers(); rainLayer.clearLayers(); streamLayer.clearLayers(); streamEndpointLayer.clearLayers();
-      form.reset(); lastCalculation = null; simulationButton.disabled = true;
+      fullBasinLayer.clearLayers(); basinLayer.clearLayers(); crossSectionLayer.clearLayers(); clearTopography(); clearMicrobasins(); basinOverlapLayer.clearLayers(); rainLayer.clearLayers(); streamLayer.clearLayers(); streamEndpointLayer.clearLayers();
+      const showIsohyets = showIsohyetsInput.checked;
+      form.reset(); showIsohyetsInput.checked = showIsohyets; lastCalculation = null; simulationButton.disabled = true;
       loading.hidden = true; content.hidden = true; empty.hidden = false;
       empty.querySelector('h3').textContent = 'Selecione um ponto';
       empty.querySelector('p').textContent = 'Preencha as coordenadas ou clique no mapa para calcular as vazões da bacia correspondente.';
@@ -880,6 +1140,7 @@
     };
     includeUpstreamInput.addEventListener('change', recalculateOnOptionChange);
     if (partialBasinInput) partialBasinInput.addEventListener('change', recalculateOnOptionChange);
+    if (showTopographyInput) showTopographyInput.addEventListener('change', recalculateOnOptionChange);
     map.on('click', e => { if (isDrawing || isIsohyetEditing) return; selectPoint(e.latlng.lat, e.latlng.lng); if (innerWidth < 720) setSearchOpen(true); });
     map.on('pm:create', event => {
       if (event.shape !== 'Polygon') return;
@@ -1019,7 +1280,7 @@
       }
       const base = getActiveRegBaseParams();
       if ((byRainfall || byCalculated) && Number.isFinite(base.avg_discharge_m3s) && base.avg_discharge_m3s > 0) {
-        regAvgQInput.value = base.avg_discharge_m3s.toFixed(2);
+        regAvgQInput.value = RegflowNumbers.input(base.avg_discharge_m3s);
       }
       const xt10 = base.xt_by_period?.[10] ?? 0.748;
       const q0_10 = Number.isFinite(base.avg_discharge_m3s) ? xt10 * base.coef_a * base.avg_discharge_m3s : NaN;
@@ -1125,7 +1386,7 @@
       const k = scenario.k_seconds_per_month || 2628000;
       const maxDemandHm3 = (scenario.qf_m3s * k * maxD) / 1e6;
       const maxAvailHm3 = series.length ? series[series.length - 1].available_volume_hm3 : maxDemandHm3;
-      const yMax = Math.max(maxDemandHm3, maxAvailHm3, scenario.volume_hm3 * 1.3, 1) * 1.08;
+      const yMax = (Math.max(maxDemandHm3, maxAvailHm3, scenario.volume_hm3 * 1.3, 0) || 1) * 1.08;
 
       const width = 760, height = 300, padL = 62, padR = 26, padT = 22, padB = 42;
       const plotW = width - padL - padR, plotH = height - padT - padB;
@@ -1268,7 +1529,7 @@
         const h4 = document.createElement('h4');
         h4.textContent = metric.label;
         group.appendChild(h4);
-        const max = Math.max(...scenarios.map(s => Number(s[metric.key]) || 0), 0.01);
+        const max = (Math.max(...scenarios.map(s => Number(s[metric.key]) || 0), 0) || 1);
         scenarios.forEach((scen, idx) => {
           const row = document.createElement('div');
           row.className = 'chart-row';
@@ -1352,11 +1613,11 @@
       syncMapBasinOptions(lastCalculation);
       regSourceMode.value = 'map';
       regQMode.value = 'calculated';
-      regAvgQInput.value = Number(lastCalculation.avg_discharge).toFixed(2);
-      if (Number.isFinite(lastCalculation.area_km2)) regAreaInput.value = Number(lastCalculation.area_km2).toFixed(2);
-      if (Number.isFinite(lastCalculation.isolines?.avg_areas)) regRainInput.value = Number(lastCalculation.isolines.avg_areas).toFixed(1);
-      const defaultQf = Math.max(0.01, Number((lastCalculation.avg_discharge * 0.5).toFixed(2)));
-      regQfInput.value = defaultQf.toFixed(2);
+      regAvgQInput.value = RegflowNumbers.input(lastCalculation.avg_discharge);
+      if (Number.isFinite(lastCalculation.area_km2)) regAreaInput.value = RegflowNumbers.input(lastCalculation.area_km2);
+      if (Number.isFinite(lastCalculation.isolines?.avg_areas)) regRainInput.value = RegflowNumbers.input(lastCalculation.isolines.avg_areas);
+      const defaultQf = lastCalculation.avg_discharge * 0.5;
+      regQfInput.value = RegflowNumbers.input(defaultQf);
       updateRegBaseSummary();
       regQueuedScenarios = [
         { id: 'map-t10', name: `QF ${number(defaultQf, 2)} m³/s · 10% (T=10 anos)`, qf_m3s: defaultQf, return_period_years: 10, failure_probability_percent: 10 },
@@ -1463,7 +1724,7 @@
         const base = getActiveRegBaseParams();
         const ratio = Number(chip.dataset.qfRatio);
         if (Number.isFinite(base.avg_discharge_m3s) && base.avg_discharge_m3s > 0 && Number.isFinite(ratio)) {
-          regQfInput.value = Math.max(0.01, base.avg_discharge_m3s * ratio).toFixed(2);
+          regQfInput.value = RegflowNumbers.input(base.avg_discharge_m3s * ratio);
         }
       };
     });

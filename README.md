@@ -29,7 +29,7 @@ npm run dev
 - Documentação interativa Swagger UI: `http://localhost:3001/api-docs` (ou `http://localhost:3001/reg-flow/api-docs`)
 - Healthcheck da aplicação e camadas em memória: `http://localhost:3001/api/health` (ou `http://localhost:3001/reg-flow/api/health`)
 
-## Execução em Produção com Docker Compose (Subpath `/reg-flow`)
+## Execução em Produção com Docker Compose - Ambiente de Produção (Subpath `/reg-flow`)
 
 O projeto inclui [`Dockerfile`](Dockerfile) multi-stage otimizado (`node:24-alpine`, usuário não-root `node`, `HEALTHCHECK` nativo e *graceful shutdown* `SIGTERM`/`SIGINT`) e [`docker-compose.yml`](docker-compose.yml) configurado para rodar sob o subpath **`/reg-flow`** (`BASE_PATH=/reg-flow`) atrás do **Nginx já existente no servidor**:
 

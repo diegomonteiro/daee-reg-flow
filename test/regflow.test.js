@@ -103,3 +103,14 @@ test('handles Mapbox elevation success, API_TOKEN fallback, malformed responses 
     else process.env.API_TOKEN = originalApiToken;
   }
 });
+
+test('hydrological flows remain positive and scale linearly for very small basin areas', () => {
+  const full = regflow.calculateAvgFlowRateLongPeriod(-20, 0.03, 1500, 1);
+  for (const area of [0.1, 0.001, 0.000001, 1e-9]) {
+    const average = regflow.calculateAvgFlowRateLongPeriod(-20, 0.03, 1500, area);
+    assert.ok(average > 0);
+    assert.ok(Math.abs(average / (full * area) - 1) < 1e-12);
+    assert.ok(regflow.calculateQ95('a', average) > 0);
+    assert.ok(regflow.calculateQ7T(0.75, 'a', 0, 0.3, 0.02, average) > 0);
+  }
+});

@@ -10,7 +10,7 @@
     "dev": "nodemon ./bin/www",
     "test": "node --test",
     "test:coverage": "node --experimental-test-coverage --test",
-    "check": "node --check app.js && node --check bin/www && node --check routes/index.js && node --check routes/apis.js && node --check models/regflow.js && node --check test/api.test.js && node --check test/regflow.test.js",
+    "check": "node --check app.js && node --check bin/www && node --check routes/index.js && node --check routes/apis.js && node --check models/regflow.js && node --check test/api.test.js && node --check test/regflow.test.js && node --check services/dem-delineation.js && node --check test/dem-delineation.test.js && node --check public/javascripts/numbers.js && node --check test/numbers.test.js",
     "docker:build": "docker compose build",
     "docker:up": "docker compose up -d --build",
     "docker:down": "docker compose down",

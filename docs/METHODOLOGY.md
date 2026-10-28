@@ -124,25 +124,36 @@ $$Q_{7,10} = C \cdot X_{10} \cdot (A + B) \cdot \overline{Q} \quad [\text{m}^3/\
 
 ## 3. Algoritmos Geométricos e Topológicos (`routes/apis.js`)
 
-### 3.1. Seccionamento Transversal da Sub-Bacia Contribuinte (`splitBasinUpstreamByPoint`)
+### 3.1. Delimitação contribuinte pelo MDE D8
 
-Quando o usuário consulta um ponto `(lat, lon)` com o modo **Cálculo parcial da bacia (`partial_basin=true`)** ativo:
+Com `partial_basin=true`, a consulta usa `services/dem-delineation.js` e `scripts/hydrology/delineate.py`. Células de drenagem são extraídas pela acumulação global equivalente a uma área mínima configurável (padrão 0,1 km²). Escolhe-se a célula mais próxima do ponto dentro da ottobacia inteira, sem raio máximo; empates preferem proximidade à rede oficial e maior acumulação. O grafo D8 reverso define a área contribuinte local, limitada à máscara oficial. A fronteira interna entre células contribuintes e não contribuintes substitui a antiga corda transversal. Distância à drenagem oficial é diagnóstico, sem restrição de busca.
 
-1. **Orientação do Trecho de Drenagem**:
-   - Os segmentos de `ottotrecho` da ottobacia são concatenados e orientados do **Ponto Montante** (nascente local) para o **Ponto Jusante** (exutório da ottobacia) usando a cota altimétrica (`stream_endpoints`) ou a adjacência topológica com a ottobacia de jusante (`COBACIAJUS`).
-2. **Projeção sobre o Rio e Tangente Macro Suavizada**:
-   - O ponto clicado é projetado ortogonalmente sobre a polilinha do curso d'água (`snapPointToLineCoords`), determinando a fração longitudinal $f \in [0, 1]$ ao longo do rio.
-   - Para evitar que pequenos meandros locais inclinem incorretamente a linha de corte, o algoritmo calcula um vetor tangente suavizado usando uma janela de $\pm 18\%$ do comprimento do trecho (mínimo de $350\text{ m}$) em torno do ponto projetado, combinado com o eixo global montante $\to$ jusante.
-3. **Escolha da Menor Corda Transversal Contida na Bacia**:
-   - São testados ângulos candidatos em torno da normal ao rio ($0^\circ, \pm 10^\circ, \pm 20^\circ, \pm 35^\circ, \pm 50^\circ$, além dos eixos cardeais).
-   - Para cada ângulo, `findContainingChordSegment` intersecta a reta infinita com o contorno da ottobacia e extrai **apenas o segmento de corda contíguo que passa pelo ponto no rio**, descartando lóbulos côncavos externos.
-   - É escolhida a corda que minimiza a largura transversal ponderada pelo alinhamento perpendicular ao curso d'água.
-4. **Divisão Poligonal (`splitPolygonByChord`)**:
-   - O anel externo da ottobacia é dividido nos dois pontos de interseção com a corda transversal (`ringA` e `ringB`), e seleciona-se o polígono que contém o trecho de montante do rio (nascente).
+### 3.2. Agregação das bacias contribuintes
 
-### 3.2. Agregação Multi-Bacias pela Ottocodificação (`collectUpstreamBasinCodes`)
+Com `include_upstream=true`, entradas D8 de ottobacias imediatamente a montante são verificadas num halo de uma célula. Somente doadores que deságuam na área selecionada habilitam seu ramo. Cada ramo é expandido pela árvore `COBACIAJUS`, com proteção contra ciclos, e seus polígonos são agregados integralmente. Evita-se agregar tributários cuja entrada está a jusante do ponto. Essa combinação depende da resolução e da concordância da topologia oficial com o MDE.
 
-Quando `include_upstream=true` é informado:
-- O sistema parte do código `COBACIA` da ottobacia selecionada e busca recursivamente no índice `upstreamBasinsByDownstream` todas as ottobacias cujo atributo `COBACIAJUS` aponta para a bacia atual (e assim sucessivamente até as cabeceiras).
-- A geometria resultante (`ottobacia`) torna-se um `MultiPolygon` formado pela sub-bacia contribuinte à montante do ponto (ou 100% da bacia do ponto se `partial_basin=false`) unida a 100% da área de todas as ottobacias tributárias à montante.
+Com `partial_basin=false`, mantém-se a ottobacia inteira e a árvore completa a montante. As equações DAEE e a ponderação por interseção permanecem iguais, aplicadas à geometria resultante. Não há fallback para o delimitador reto. Consulte [preparação, algoritmo, desempenho e limitações](DEM_DELINEATION.md).
 
+## Precisão numérica e apresentação de bacias pequenas
+
+As equações e as ponderações usam números JavaScript em dupla precisão e os campos numéricos da API não são truncados para duas casas decimais. A interface aplica formatação apenas ao texto apresentado. Para magnitudes entre zero e um, mantém ao menos três algarismos significativos (respeitando o mínimo de casas solicitado); se isso exigir mais de 12 casas, usa notação científica. Zero real continua zero; valores ausentes/não finitos aparecem como travessão. Mais casas na tela não significam maior precisão topográfica ou estatística da regionalização. As unidades permanecem m³/s e km².
+
+O simulador recebe os valores completos de vazão, área e chuva da bacia, usando representação numérica que permite reconstruir o mesmo número. Demandas padrão e atalhos percentuais usam a proporção solicitada sem impor mínimo artificial de 0,01 m³/s. Limites positivos são verificados na validação do cálculo; os campos aceitam decimais pequenos. Os gráficos escalam ao máximo dos dados, sem piso fixo de 1 hm³ ou 0,01 que achate resultados pequenos. Os campos legados explicitamente denominados `_rounded` na API continuam sendo arredondamentos opcionais; para cálculo, usar os campos brutos.
+
+## Microbacias incrementais por trecho D8
+
+A funcionalidade de microbacias identifica links da rede extraída por acumulação mínima e separa-os nas confluências. A contribuição incremental de cada link é formada por suas células e pelas encostas cujo primeiro link alcançado é esse. Uma célula de confluência inicia o trecho a jusante. Os polígonos resultantes são disjuntos; contribuições acumuladas exigiriam percorrer `downstream_unit_id` e unir as unidades correspondentes. Saídas da ottobacia antes de alcançar a rede são residuais explicitamente separadas. A máscara por centros de células pode deixar uma faixa vetorial de borda não classificada, informada nos metadados. Detalhes, limites e validação em [DEM_DELINEATION.md](DEM_DELINEATION.md).
+
+### Ottotrechos na bacia desenhada
+
+`POST /api/geometry_calculate` seleciona espacialmente todos os ottotrechos oficiais que intersectam o Polygon/MultiPolygon enviado, usando pré-filtro por bounding box e `booleanIntersects` (inclui contato com a borda; respeita os vazios do polígono). Não restringe a seleção ao centróide ou aos vértices da linha, pois um trecho pode atravessar o desenho com os dois extremos externos. As linhas são devolvidas integralmente para conferência, com `NUCOMPTREC` e extremos referentes ao trecho oficial completo; não representam comprimento recortado dentro do desenho. Nenhuma feição oficial é alterada e nenhuma bacia adicional é agregada ao cálculo de vazões. O mapa desenha a drenagem sobre os preenchimentos das bacias.
+
+No desenho, a classificação dos extremos usa a topologia oficial, sem chamadas externas de elevação por trecho; cotas indisponíveis são retornadas como `null`.
+
+### Visualização das isoietas
+
+A opção **Exibir isoietas no mapa**, ativada por padrão, controla as faixas históricas e as camadas dos cenários simulados, inclusive após uma nova consulta por ponto ou desenho. A mudança é local e não refaz nem altera cálculos de precipitação ou vazões. As isoietas usam um pane próprio acima dos polígonos de bacia e abaixo dos ottotrechos. As camadas de edição continuam visíveis durante a edição.
+
+### Memorial da regionalização
+
+O modal **Ver memorial de cálculo** detalha a delimitação, a área final, a média de precipitação ponderada pelas interseções, a ponderação dos coeficientes RAU e XYZ, a vazão média e as vazões regionais Q95/Q7,10 com os fatores reais das tabelas DAEE. `services/calculation-memorial.js` registra esses parâmetros na API; o frontend apresenta as fórmulas e substituições com até oito casas decimais (mais casas para números pequenos). As vazões regionais usam a mesma vazão média global e o mesmo C ponderado utilizados no algoritmo da consulta. Simulações pluviométricas e de regularização continuam tendo resultados próprios e não substituem o memorial da consulta base.

@@ -2,7 +2,7 @@
   "openapi": "3.0.3",
   "info": {
     "title": "SP-ÁGUAS | REG-FLOW — API de Regionalização Hidrológica",
-    "version": "1.2.0",
+    "version": "1.5.0",
     "description": "API RESTful do sistema **REG-FLOW** para regionalização hidrológica de vazões médias, mínimas ($Q_{7,10}$, $Q_{d,T}$), curvas de permanência ($Q_{95\\%}$), simulação de isoietas e cálculo de **Volume de Regularização Intra-Anual ($V_c$ e $d_c$)** no Estado de São Paulo, fundamentada na metodologia oficial do DAEE (1988) — *Regionalização Hidrológica no Estado de São Paulo* (Revista Águas e Energia Elétrica, Ano 5, nº 14).",
     "contact": {
       "name": "SP-ÁGUAS / Equipe Técnica REG-FLOW"
@@ -17,7 +17,7 @@
   "tags": [
     {
       "name": "Consulta Espacial e Bacias",
-      "description": "Cálculo regionalizado completo por coordenadas geográficas (com corte transversal opcional e agregação de ottobacias à montante) ou por polígono desenhado."
+      "description": "Cálculo regionalizado completo por coordenadas geográficas (com delimitação MDE opcional e agregação de ramos contribuintes à montante) ou por polígono desenhado."
     },
     {
       "name": "Regularização de Vazão (DAEE Eq. 14 e 15)",
@@ -65,37 +65,63 @@
     },
     "/api/coords_join/{lat}/{lon}": {
       "get": {
-        "tags": ["Consulta Espacial e Bacias"],
+        "tags": [
+          "Consulta Espacial e Bacias"
+        ],
         "summary": "Calcula a regionalização hidrológica completa a partir de coordenadas (lat/lon)",
-        "description": "Localiza a ottobacia no Estado de São Paulo que contém o ponto `(lat, lon)`, identifica o ottotrecho principal, aplica opcionalmente o recorte transversal à montante do ponto (`partial_basin=true`) e/ou agrega recursivamente todas as ottobacias à montante até a nascente (`include_upstream=true`) segundo a ottocodificação (`COBACIA` / `COBACIAJUS`). Calcula precipitação média ponderada por área, coeficientes `RAU` e `RXYZ`, vazão média plurianual ($\\overline{Q}$), $Q_{95\\%}$ e $Q_{7,10}$. Possui cache em memória de 15 minutos (`X-Cache: HIT|MISS`) e rate limit de 30 req/min por IP.",
+        "description": "Localiza a ottobacia e, com partial_basin=true (padrão), delimita por MDE D8 a área contribuinte ao exutório ajustado à célula de drenagem mais próxima em toda a ottobacia, sem raio máximo. A rede usa área contribuinte mínima configurável (DEM_MIN_DRAINAGE_AREA_KM2, padrão 0,1 km²). Com include_upstream=true, inclui apenas ramos cuja entrada D8 alcança a área selecionada. partial_basin=false preserva a ottobacia inteira e a árvore COBACIAJUS. Coeficientes e vazões DAEE usam a geometria resultante. Requer rasters/Python nas consultas parciais; sem fallback para corte reto. Cache por coordenadas exatas e parâmetros (15 min), rate limit 30/min/IP. A visualização topográfica é independente do cálculo parcial: include_topography=true (padrão) também permite a imagem da ottobacia inteira; uma falha de renderização nesse modo não impede o cálculo integral.",
         "parameters": [
           {
             "name": "lat",
             "in": "path",
             "required": true,
             "description": "Latitude em graus decimais (WGS84, entre -90 e 90, dentro do Estado de São Paulo).",
-            "schema": { "type": "number", "example": -23.55 }
+            "schema": {
+              "type": "number",
+              "example": -23.55
+            }
           },
           {
             "name": "lon",
             "in": "path",
             "required": true,
             "description": "Longitude em graus decimais (WGS84, entre -180 e 180, dentro do Estado de São Paulo).",
-            "schema": { "type": "number", "example": -46.633309 }
+            "schema": {
+              "type": "number",
+              "example": -46.633309
+            }
           },
           {
             "name": "partial_basin",
             "in": "query",
             "required": false,
-            "description": "Quando `true` (padrão), secciona a ottobacia transversalmente no ponto clicado e calcula apenas a sub-bacia contribuinte à montante. Quando `false` (ou `0`), calcula 100% da ottobacia sem corte transversal.",
-            "schema": { "type": "boolean", "default": true, "example": true }
+            "description": "true: contribuição por MDE D8 ao exutório mais próximo, sem limite de ajuste; false: ottobacia inteira.",
+            "schema": {
+              "type": "boolean",
+              "default": true,
+              "example": true
+            }
           },
           {
             "name": "include_upstream",
             "in": "query",
             "required": false,
-            "description": "Quando `true` (ou `1`), percorre recursivamente a árvore hidrográfica à montante pela ottocodificação (`COBACIAJUS = COBACIA`) até as cabeceiras e soma todas as ottobacias à montante.",
-            "schema": { "type": "boolean", "default": false, "example": false }
+            "description": "Agrega recursivamente os ramos contribuintes. Na consulta parcial, somente entradas D8 conectadas à área local são consideradas; suas ottobacias ancestrais são agregadas integralmente por COBACIAJUS.",
+            "schema": {
+              "type": "boolean",
+              "default": false,
+              "example": false
+            }
+          },
+          {
+            "name": "include_topography",
+            "in": "query",
+            "required": false,
+            "description": "Exibe o recorte do MDE independentemente de partial_basin. true por padrão; false/0 omite a imagem e seu processamento. No modo integral, renderiza apenas elevação, sem ajustar exutório ou executar D8.",
+            "schema": {
+              "type": "boolean",
+              "default": true
+            }
           }
         ],
         "responses": {
@@ -104,12 +130,20 @@
             "headers": {
               "X-Cache": {
                 "description": "Indica se o resultado veio do cache em memória (`HIT`) ou foi calculado na requisição (`MISS`).",
-                "schema": { "type": "string", "enum": ["HIT", "MISS"] }
+                "schema": {
+                  "type": "string",
+                  "enum": [
+                    "HIT",
+                    "MISS"
+                  ]
+                }
               }
             },
             "content": {
               "application/json": {
-                "schema": { "$ref": "#/components/schemas/CoordsJoinResponse" }
+                "schema": {
+                  "$ref": "#/components/schemas/CoordsJoinResponse"
+                }
               }
             }
           },
@@ -117,7 +151,9 @@
             "description": "Coordenada inválida ou ponto fora do Estado de São Paulo.",
             "content": {
               "application/json": {
-                "schema": { "$ref": "#/components/schemas/ErrorResponse" }
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
               }
             }
           },
@@ -125,7 +161,9 @@
             "description": "Nenhuma ottobacia encontrada para as coordenadas informadas.",
             "content": {
               "application/json": {
-                "schema": { "$ref": "#/components/schemas/ErrorResponse" }
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
               }
             }
           },
@@ -133,9 +171,14 @@
             "description": "Limite de requisições excedido (30 req/min por IP).",
             "content": {
               "application/json": {
-                "schema": { "$ref": "#/components/schemas/ErrorResponse" }
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
               }
             }
+          },
+          "503": {
+            "description": "Dados MDE não configurados, processamento ocupado, dependência ausente ou orçamento excedido."
           }
         }
       }
@@ -144,7 +187,7 @@
       "post": {
         "tags": ["Consulta Espacial e Bacias"],
         "summary": "Calcula a regionalização hidrológica a partir de um polígono GeoJSON desenhado",
-        "description": "Recebe uma feição ou geometria GeoJSON (`Polygon` ou `MultiPolygon`, até 5.000 vértices, sem autointerseções e contida no Estado de São Paulo), calcula área, precipitação média ponderada, coeficientes regionais ponderados (`RAU` e `RXYZ`), vazões ($\\overline{Q}$, $Q_{95\\%}$, $Q_{7,10}$) e a lista detalhada de ottobacias oficiais intersectadas pelo polígono.",
+        "description": "Recebe uma feição ou geometria GeoJSON (`Polygon` ou `MultiPolygon`, até 5.000 vértices, sem autointerseções e contida no Estado de São Paulo), calcula área, precipitação média ponderada, coeficientes regionais ponderados (`RAU` e `RXYZ`), vazões ($\\overline{Q}$, $Q_{95\\%}$, $Q_{7,10}$) e a lista detalhada de ottobacias oficiais intersectadas pelo polígono. Retorna em `ottotrecho` todos os trechos oficiais que intersectam o desenho, com geometria integral (sem recorte), extensão oficial e pontos de montante/jusante para conferência. A seleção é espacial, sem agregação automática a montante.",
         "requestBody": {
           "required": true,
           "content": {
@@ -195,14 +238,18 @@
     },
     "/api/regularization_simulation": {
       "post": {
-        "tags": ["Regularização de Vazão (DAEE Eq. 14 e 15)"],
+        "tags": [
+          "Regularização de Vazão (DAEE Eq. 14 e 15)"
+        ],
         "summary": "Simula de 1 a 12 cenários de regularização de vazão intra-anual (Equações 12 a 15)",
-        "description": "Calcula o volume de armazenamento intra-anual $V_c$ ($\\text{m}^3$ e $\\text{hm}^3$), a duração crítica $d_c$ (meses), a vazão mínima de 1 mês $Q_{1,T}$, a vazão limite para $d_c = 6$ meses ($Q_{F,\\text{máx}(d_c=6)}$) e a série mensal de 1 a 12 meses (Demanda vs. Disponibilidade Natural — Figura 4 do DAEE, 1988) para até 12 cenários.",
+        "description": "Calcula o volume de armazenamento intra-anual $V_c$ ($\\text{m}^3$ e $\\text{hm}^3$), a duração crítica $d_c$ (meses), a vazão mínima de 1 mês $Q_{1,T}$, a vazão limite para $d_c = 6$ meses ($Q_{F,\\text{máx}(d_c=6)}$) e a série mensal de 1 a 12 meses (Demanda vs. Disponibilidade Natural — Figura 4 do DAEE, 1988) para até 12 cenários. Os valores numéricos de vazão, área e volume são retornados sem arredondamento de apresentação. Nomes automáticos de cenários usam casas adaptativas para não representar pequenas demandas positivas como zero.",
         "requestBody": {
           "required": true,
           "content": {
             "application/json": {
-              "schema": { "$ref": "#/components/schemas/RegularizationSimulationRequest" }
+              "schema": {
+                "$ref": "#/components/schemas/RegularizationSimulationRequest"
+              }
             }
           }
         },
@@ -211,11 +258,15 @@
             "description": "Resultados comparativos dos cenários de regularização simulados.",
             "content": {
               "application/json": {
-                "schema": { "$ref": "#/components/schemas/RegularizationSimulationResponse" }
+                "schema": {
+                  "$ref": "#/components/schemas/RegularizationSimulationResponse"
+                }
               }
             }
           },
-          "400": { "description": "Parâmetros de entrada inválidos." }
+          "400": {
+            "description": "Parâmetros de entrada inválidos."
+          }
         }
       }
     },
@@ -581,6 +632,302 @@
         ],
         "responses": { "200": { "description": "Lista de feições LineString/MultiLineString do ottotrecho." } }
       }
+    },
+    "/api/ottobacias/{cod}/microbasins": {
+      "get": {
+        "tags": [
+          "Consulta Espacial e Bacias"
+        ],
+        "summary": "Subdivide uma ottobacia em contribuições locais por trecho D8 e confluências",
+        "description": "Extrai drenagem pelo limiar de acumulação global, identifica trechos entre nascentes/confluências/saídas e associa cada célula à primeira unidade alcançada a jusante. Os polígonos são incrementais, disjuntos e locais, não bacias acumuladas. Áreas que saem da máscara antes de alcançar a rede são explicitamente residual_outlet. Faixas vetoriais de borda sem centros de células são reportadas em unclassified_boundary_area_km2. Não agrega ottobacias externas e não altera equações DAEE. Até 4 milhões de células e 5000 unidades, execução limitada a 8,5 s; acima dos limites requer processamento offline. Cache LRU de até 8 resultados / 16 MB serializados, TTL 15 min, invalidado por alteração de tamanho/mtime dos rasters.",
+        "parameters": [
+          {
+            "name": "cod",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "example": "8669921"
+            }
+          },
+          {
+            "name": "min_drainage_area_km2",
+            "in": "query",
+            "schema": {
+              "type": "number",
+              "minimum": 0,
+              "exclusiveMinimum": true,
+              "default": 0.1
+            },
+            "description": "Área acumulada global mínima para extrair a rede; padrão DEM_MIN_DRAINAGE_AREA_KM2 ou 0,1. Não define a área mínima/fixa de cada microbacia."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "FeatureCollection GeoJSON WGS84 com metadata adicional; áreas calculadas no CRS projetado. X-Cache HIT/MISS.",
+            "headers": {
+              "X-Cache": {
+                "schema": {
+                  "type": "string",
+                  "enum": [
+                    "HIT",
+                    "MISS"
+                  ]
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "type",
+                    "features",
+                    "metadata"
+                  ],
+                  "properties": {
+                    "type": {
+                      "type": "string",
+                      "enum": [
+                        "FeatureCollection"
+                      ]
+                    },
+                    "features": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "type": {
+                            "type": "string",
+                            "enum": [
+                              "Feature"
+                            ]
+                          },
+                          "geometry": {
+                            "type": "object",
+                            "description": "Polygon/MultiPolygon recortado à ottobacia, em WGS84."
+                          },
+                          "properties": {
+                            "type": "object",
+                            "properties": {
+                              "unit_id": {
+                                "type": "integer"
+                              },
+                              "kind": {
+                                "type": "string",
+                                "enum": [
+                                  "stream_reach",
+                                  "residual_outlet"
+                                ]
+                              },
+                              "downstream_unit_id": {
+                                "type": "integer",
+                                "nullable": true
+                              },
+                              "area_km2": {
+                                "type": "number"
+                              },
+                              "cell_count": {
+                                "type": "integer"
+                              },
+                              "outlet": {
+                                "type": "array",
+                                "items": {
+                                  "type": "number"
+                                },
+                                "minItems": 2,
+                                "maxItems": 2,
+                                "description": "[lon,lat] da última célula da unidade."
+                              }
+                            }
+                          }
+                        }
+                      }
+                    },
+                    "metadata": {
+                      "type": "object",
+                      "description": "basin_code, method, min_drainage_area_km2, microbasins_count, residual_count, valid_cells, classified_cells, area_km2, basin_area_km2, unclassified_boundary_area_km2, resolution_m e warnings."
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Limiar inválido"
+          },
+          "404": {
+            "description": "Ottobacia não encontrada"
+          },
+          "422": {
+            "description": "Dados incompatíveis, ciclos, NoData, ausência de drenagem ou limites de tamanho"
+          },
+          "429": {
+            "description": "Limite de requisições"
+          },
+          "503": {
+            "description": "Serviço ocupado, rasters ausentes ou limite de execução excedido"
+          }
+        }
+      }
+    },
+    "/api/dem_delineation/{lat}/{lon}": {
+      "get": {
+        "tags": [
+          "Consulta Espacial e Bacias"
+        ],
+        "summary": "Delimita área contribuinte e divisor interno usando MDE D8",
+        "description": "Contribuição local por D8 ao exutório ajustado à célula de drenagem mais próxima, sem raio máximo. Células elegíveis: acumulação global equivalente a DEM_MIN_DRAINAGE_AREA_KM2 (padrão 0,1 km²). Empates preferem proximidade à drenagem oficial e maior acumulação. Distância à rede oficial é diagnóstico, não limite. snap_distance_m na resposta é distância efetiva; o antigo parâmetro de consulta é ignorado. Uma tarefa por processo; execução Python limitada a 8,5 s. Retorna códigos de entradas D8 imediatamente a montante, sem agregar seus polígonos.",
+        "parameters": [
+          {
+            "name": "lat",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "number",
+              "minimum": -90,
+              "maximum": 90
+            }
+          },
+          {
+            "name": "lon",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "number",
+              "minimum": -180,
+              "maximum": 180
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "GeoJSON WGS84; área no CRS métrico do raster.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "basin_code",
+                    "method",
+                    "contributing_area",
+                    "divide",
+                    "snapped_point",
+                    "snap_distance_m",
+                    "area_km2",
+                    "cell_count",
+                    "resolution_m",
+                    "scope",
+                    "warnings"
+                  ],
+                  "properties": {
+                    "basin_code": {
+                      "type": "string"
+                    },
+                    "method": {
+                      "type": "string",
+                      "enum": [
+                        "dem_d8_esri"
+                      ]
+                    },
+                    "contributing_area": {
+                      "type": "object",
+                      "description": "Feature Polygon ou MultiPolygon WGS84"
+                    },
+                    "divide": {
+                      "type": "object",
+                      "nullable": true,
+                      "description": "Feature LineString ou MultiLineString; fronteira interna com células não contribuintes"
+                    },
+                    "snapped_point": {
+                      "type": "array",
+                      "items": {
+                        "type": "number"
+                      },
+                      "minItems": 2,
+                      "maxItems": 2,
+                      "description": "[longitude, latitude]"
+                    },
+                    "snap_distance_m": {
+                      "type": "number"
+                    },
+                    "area_km2": {
+                      "type": "number"
+                    },
+                    "cell_count": {
+                      "type": "integer"
+                    },
+                    "resolution_m": {
+                      "type": "array",
+                      "items": {
+                        "type": "number"
+                      }
+                    },
+                    "snapped_accumulation_cells": {
+                      "type": "number",
+                      "description": "Acumulação absoluta global na célula ajustada; pode incluir outras ottobacias"
+                    },
+                    "scope": {
+                      "type": "string",
+                      "enum": [
+                        "within_ottobasin"
+                      ]
+                    },
+                    "warnings": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    },
+                    "snap_method": {
+                      "type": "string",
+                      "enum": [
+                        "nearest_d8_drainage_cell"
+                      ]
+                    },
+                    "min_drainage_area_km2": {
+                      "type": "number",
+                      "example": 0.1
+                    },
+                    "distance_to_official_stream_m": {
+                      "type": "number"
+                    },
+                    "contributing_upstream_codes": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      },
+                      "description": "Entradas imediatamente a montante cujo fluxo D8 chega à área local selecionada"
+                    },
+                    "topography": {
+                      "$ref": "#/components/schemas/TopographyOverlay"
+                    },
+                    "topography_warning": {
+                      "type": "string",
+                      "nullable": true
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Coordenadas inválidas."
+          },
+          "404": {
+            "description": "Ottobacia não encontrada"
+          },
+          "422": {
+            "description": "Cobertura incompleta, NoData, grade incompatível ou ajuste impossível"
+          },
+          "429": {
+            "description": "Limite de requisições excedido"
+          },
+          "503": {
+            "description": "Dados não configurados, serviço ocupado, dependência ausente ou orçamento excedido"
+          }
+        }
+      }
     }
   },
   "components": {
@@ -611,34 +958,222 @@
           }
         }
       },
+      "TopographyOverlay": {
+        "type": "object",
+        "nullable": true,
+        "description": "Recorte visual do MDE preparado de entrada, limitado à ottobacia do ponto. PNG RGBA transparente, reprojetado para Web Mercator para alinhar ao Leaflet. A redução para até 512 px é apenas de exibição. Não representa elevação corrigida internamente pelo A*. Cotas na unidade da banda fonte (sem unidade vertical confirmada nos metadados).",
+        "properties": {
+          "image": {
+            "type": "string",
+            "format": "uri",
+            "pattern": "^data:image/png;base64,",
+            "description": "PNG RGBA codificado em data URI."
+          },
+          "bounds": {
+            "type": "array",
+            "minItems": 2,
+            "maxItems": 2,
+            "items": {
+              "type": "array",
+              "minItems": 2,
+              "maxItems": 2,
+              "items": {
+                "type": "number"
+              }
+            },
+            "description": "Limites Leaflet [[sul,oeste],[norte,leste]], em WGS84."
+          },
+          "width": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 512
+          },
+          "height": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 512
+          },
+          "display_min": {
+            "type": "number",
+            "description": "Menor cota representada na imagem reduzida."
+          },
+          "display_max": {
+            "type": "number",
+            "description": "Maior cota representada na imagem reduzida."
+          },
+          "colors": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Rampa de menor para maior cota."
+          },
+          "contours": { "type": "object", "nullable": true, "description": "FeatureCollection WGS84 de LineStrings recortadas à ottobacia. Cada feição contém elevation_m e major (múltiplos de 50 m). Extração visual no MDE amostrado para exibição, com equidistância de 10 m." },
+          "contours_warning": { "type": "string", "nullable": true },
+          "contour_interval_m": { "type": "integer", "enum": [10] },
+          "contour_major_interval_m": { "type": "integer", "enum": [50] },
+          "contour_sample_resolution_m": { "type": "array", "items": { "type": "number" }, "description": "Resolução métrica efetiva das amostras usadas na extração visual." },
+          "source_resolution_m": {
+            "type": "array",
+            "items": {
+              "type": "number"
+            },
+            "description": "Resolução da grade métrica de entrada; não é a resolução da imagem reduzida."
+          },
+          "scope": {
+            "type": "string",
+            "enum": [
+              "clicked_ottobasin"
+            ]
+          },
+          "source": {
+            "type": "string",
+            "enum": [
+              "prepared_elevation"
+            ]
+          },
+          "display_crs": {
+            "type": "string",
+            "enum": [
+              "EPSG:3857"
+            ]
+          },
+          "elevation_unit": {
+            "type": "string",
+            "enum": [
+              "source"
+            ]
+          }
+        }
+      },
       "CoordsJoinResponse": {
         "type": "object",
         "properties": {
-          "latitude": { "type": "number", "example": -23.55 },
-          "longitude": { "type": "number", "example": -46.633309 },
-          "include_upstream": { "type": "boolean", "example": false },
-          "partial_basin": { "type": "boolean", "example": true },
-          "available_upstream_basins_count": { "type": "integer", "example": 2 },
-          "upstream_basins": { "type": "array", "items": { "type": "object" } },
-          "area_km2": { "type": "number", "example": 18.42 },
-          "full_area_km2": { "type": "number", "example": 24.15 },
-          "area_proportion": { "type": "number", "example": 0.7627 },
-          "ottobacia": { "type": "object" },
-          "ottobacia_full": { "type": "object" },
-          "cross_section": { "type": "object", "nullable": true },
-          "ottotrecho": { "type": "array", "items": { "type": "object" } },
-          "rau": { "type": "object" },
-          "rxyz": { "type": "object" },
-          "isolines": { "type": "object" },
-          "avg_discharge": { "type": "number", "example": 0.45 },
-          "q95": { "type": "number", "example": 0.19 },
-          "q710": { "type": "number", "example": 0.12 }
+          "calculation_memorial": { "type": "object", "description": "Memorial numérico DAEE (1988): área, rainfall_bands, regions RAU com fatores f95 e X10 e vazões intermediárias, xyz_regions, weighting_areas_km2, coefficients, rainfall_mm e results. Sem arredondamento de cálculo." },
+          "latitude": {
+            "type": "number",
+            "example": -23.55
+          },
+          "longitude": {
+            "type": "number",
+            "example": -46.633309
+          },
+          "include_upstream": {
+            "type": "boolean",
+            "example": false
+          },
+          "partial_basin": {
+            "type": "boolean",
+            "example": true
+          },
+          "available_upstream_basins_count": {
+            "type": "integer",
+            "example": 2
+          },
+          "upstream_basins": {
+            "type": "array",
+            "items": {
+              "type": "object"
+            }
+          },
+          "area_km2": {
+            "type": "number",
+            "example": 18.42
+          },
+          "full_area_km2": {
+            "type": "number",
+            "example": 24.15
+          },
+          "area_proportion": {
+            "type": "number",
+            "example": 0.7627
+          },
+          "ottobacia": {
+            "type": "object"
+          },
+          "ottobacia_full": {
+            "type": "object"
+          },
+          "cross_section": {
+            "type": "object",
+            "nullable": true,
+            "description": "Divisor D8 e exutório ajustado, sem seção transversal reta. line pode ser null quando não há divisor interno.",
+            "properties": {
+              "line": {
+                "type": "object",
+                "nullable": true,
+                "description": "Feature GeoJSON LineString/MultiLineString"
+              },
+              "stream_point": {
+                "type": "array",
+                "items": {
+                  "type": "number"
+                },
+                "minItems": 2,
+                "maxItems": 2,
+                "description": "[lon,lat] do exutório D8"
+              },
+              "method": {
+                "type": "string"
+              },
+              "snap_distance_m": {
+                "type": "number"
+              }
+            }
+          },
+          "ottotrecho": {
+            "type": "array",
+            "items": {
+              "type": "object"
+            }
+          },
+          "rau": {
+            "type": "object"
+          },
+          "rxyz": {
+            "type": "object"
+          },
+          "isolines": {
+            "type": "object"
+          },
+          "avg_discharge": {
+            "type": "number",
+            "example": 0.45
+          },
+          "q95": {
+            "type": "number",
+            "example": 0.19
+          },
+          "q710": {
+            "type": "number",
+            "example": 0.12
+          },
+          "delineation": {
+            "type": "object",
+            "nullable": true,
+            "description": "Método, snap_method, snapped_point, snap_distance_m, min_drainage_area_km2, distance_to_official_stream_m, contributing_upstream_codes, resolution_m e warnings. null na consulta integral."
+          },
+          "topography": {
+            "$ref": "#/components/schemas/TopographyOverlay"
+          },
+          "topography_warning": {
+            "type": "string",
+            "nullable": true,
+            "description": "Motivo de indisponibilidade da camada visual, sem invalidar a delimitação."
+          },
+          "include_topography": {
+            "type": "boolean",
+            "default": true,
+            "description": "Opção de visualização do MDE independente do cálculo parcial."
+          }
         }
       },
       "GeometryCalculateResponse": {
         "type": "object",
         "properties": {
+          "calculation_memorial": { "type": "object", "description": "Memorial numérico DAEE (1988): área, rainfall_bands, regions RAU com fatores f95 e X10 e vazões intermediárias, xyz_regions, weighting_areas_km2, coefficients, rainfall_mm e results. Sem arredondamento de cálculo." },
           "source": { "type": "string", "example": "drawn-geometry" },
+          "ottotrecho": { "type": "array", "description": "Trechos oficiais integrais que intersectam o desenho, com propriedades originais e stream_endpoints classificados por topologia (cotas indisponíveis nesta consulta).", "items": { "type": "object" } },
           "area_km2": { "type": "number", "example": 12.5 },
           "avg_discharge": { "type": "number", "example": 0.31 },
           "q95": { "type": "number", "example": 0.14 },

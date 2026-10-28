@@ -1,4 +1,4 @@
-require('dotenv').config();
+require('dotenv').config({ path: require('node:path').join(__dirname, '.env') });
 var createError = require('http-errors');
 var express = require('express');
 var path = require('path');
@@ -54,7 +54,7 @@ app.use(function(req, res, next) {
     'X-Frame-Options': 'SAMEORIGIN',
     'Referrer-Policy': 'strict-origin-when-cross-origin',
     'Permissions-Policy': 'geolocation=(self)',
-    'Content-Security-Policy': "default-src 'self'; script-src 'self' 'unsafe-inline' https://unpkg.com; style-src 'self' 'unsafe-inline' https://unpkg.com; img-src 'self' data: blob: https://unpkg.com https://tile.openstreetmap.org https://*.tile.opentopomap.org https://datageo.ambiente.sp.gov.br; connect-src 'self' https://unpkg.com https://api.mapbox.com https://tile.openstreetmap.org https://*.tile.opentopomap.org https://datageo.ambiente.sp.gov.br; font-src 'self' data:"
+    'Content-Security-Policy': "default-src 'self'; script-src 'self' 'unsafe-inline' https://unpkg.com; style-src 'self' 'unsafe-inline' https://unpkg.com; img-src 'self' data: blob: https://unpkg.com https://tile.openstreetmap.org https://*.tile.opentopomap.org https://datageo.ambiente.sp.gov.br https://geodados.daee.sp.gov.br; connect-src 'self' https://unpkg.com https://api.mapbox.com https://tile.openstreetmap.org https://*.tile.opentopomap.org https://datageo.ambiente.sp.gov.br https://geodados.daee.sp.gov.br; font-src 'self' data:"
   });
   next();
 });

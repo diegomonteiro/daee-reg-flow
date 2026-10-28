@@ -8,9 +8,13 @@ Este documento foi preparado para engenheiros, desenvolvedores e agentes de Inte
 
 | Objetivo / Funcionalidade | Arquivo Principal | Funções / Seletores Chave |
 | :--- | :--- | :--- |
+| **Precisão e formatação numérica** | `public/javascripts/numbers.js`, `test/numbers.test.js` | Formatação adaptativa em pt-BR; `input()` preserva o número completo em campos editáveis; não reutilizar texto arredondado em cálculos |
 | **Fórmulas hidrológicas (DAEE 1988)** | [`models/regflow.js`](file:///home/diego-monteiro/apps/daee-reg-flow/models/regflow.js) | `calculateAvgFlowRateLongPeriod`, `calculateQ95`, `calculateQ7T`, `calculateQmin`, `calculateRegularizationScenario`, `resolveXTForReturnPeriod` |
 | **Interseção espacial e ponderação por área** | [`models/regflow.js`](file:///home/diego-monteiro/apps/daee-reg-flow/models/regflow.js) | `getRegionsCoeficientsByGeometry`, `getMeanRainfallByGeometry`, `intersectPolygonFeatures` |
-| **Recorte transversal da bacia no ponto** | [`routes/apis.js`](file:///home/diego-monteiro/apps/daee-reg-flow/routes/apis.js) | `splitBasinUpstreamByPoint`, `findContainingChordSegment`, `splitPolygonByChord` |
+| **Delimitação da bacia no ponto** | `routes/apis.js`, `services/dem-delineation.js`, `scripts/hydrology/delineate.py` | MDE D8 na consulta parcial padrão; exutório mais próximo sem raio, entradas contribuintes e geometria exibida |
+| **Divisor hidrológico por MDE** | `services/dem-delineation.js`, `scripts/hydrology/` | `/api/dem_delineation/:lat/:lon`; preparação e limites em `docs/DEM_DELINEATION.md` |
+| **Recorte visual da topografia considerada** | `scripts/hydrology/topography.py`, `views/index.ejs` | `topography`, `L.imageOverlay`, legenda e controle de opacidade; grade de cálculo preservada |
+| **Microbacias por confluências** | `scripts/hydrology/microbasins.py`, `services/dem-delineation.js`, `views/index.ejs` | `/api/ottobacias/:cod/microbasins`; partição incremental, resíduos explícitos, limite de unidades e cache |
 | **Árvore de ottobacias à montante (Pfafstetter)** | [`routes/apis.js`](file:///home/diego-monteiro/apps/daee-reg-flow/routes/apis.js) | `upstreamBasinsByDownstream`, `collectUpstreamBasinCodes` |
 | **Rotas REST da API** | [`routes/apis.js`](file:///home/diego-monteiro/apps/daee-reg-flow/routes/apis.js) | `GET /api/coords_join/:lat/:lon`, `POST /api/geometry_calculate`, `POST /api/regularization_simulation`, `POST /api/isohyet_simulation` |
 | **Interface do Mapa, Painéis e Modais** | [`views/index.ejs`](file:///home/diego-monteiro/apps/daee-reg-flow/views/index.ejs) | `#search-panel`, `#results-panel`, `#toggle-results-sidebar`, `#toggle-panels-visibility`, `#regularization-dialog`, `#simulation-dialog` |
